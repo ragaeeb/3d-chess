@@ -2,8 +2,8 @@ import {
   EVENT_TYPES,
   PLAYER_CHANNEL,
   type GameEvent,
-} from "./_shared/constants";
-import { handlePlayerDisconnect } from "./_shared/disconnect";
+} from "./_shared/constants.ts";
+import { handlePlayerDisconnect } from "./_shared/disconnect.ts";
 
 const encoder = new TextEncoder();
 

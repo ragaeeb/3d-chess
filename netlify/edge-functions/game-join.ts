@@ -3,8 +3,8 @@ import {
   WAITING_PLAYER_KEY,
   WAITING_TTL_SECONDS,
   type GameEvent,
-} from "./_shared/constants";
-import { publishToPlayer } from "./_shared/broadcast";
+} from "./_shared/constants.ts";
+import { publishToPlayer } from "./_shared/broadcast.ts";
 import {
   clearPlayerGame,
   createInitialGameState,
@@ -12,8 +12,8 @@ import {
   getPlayerGameId,
   saveGameState,
   setPlayerGame,
-} from "./_shared/game-state";
-import { redisDel, redisGetString, redisSetIfAbsent, redisSetString } from "./_shared/redis";
+} from "./_shared/game-state.ts";
+import { redisDel, redisGetString, redisSetIfAbsent, redisSetString } from "./_shared/redis.ts";
 
 const jsonResponse = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {

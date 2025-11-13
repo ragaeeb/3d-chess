@@ -2,8 +2,8 @@ import { Chess } from "https://esm.sh/chess.js@1.4.0";
 import {
   EVENT_TYPES,
   type GameEvent,
-} from "./_shared/constants";
-import { publishToPlayer } from "./_shared/broadcast";
+} from "./_shared/constants.ts";
+import { publishToPlayer } from "./_shared/broadcast.ts";
 import {
   clearPlayerGame,
   deleteGameState,
@@ -11,7 +11,7 @@ import {
   getPlayerGameId,
   saveGameState,
   type GameState,
-} from "./_shared/game-state";
+} from "./_shared/game-state.ts";
 
 const jsonResponse = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {

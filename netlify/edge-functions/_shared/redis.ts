@@ -1,4 +1,4 @@
-import { getEnvVar } from "./env";
+import { getEnvVar } from "./env.ts";
 
 const getConfig = () => {
   const url = getEnvVar("UPSTASH_REDIS_REST_URL");

@@ -1,7 +1,7 @@
-import { EVENT_TYPES, WAITING_PLAYER_KEY } from "./constants";
-import { publishToPlayer } from "./broadcast";
-import { clearPlayerGame, deleteGameState, getGameState, getPlayerGameId } from "./game-state";
-import { redisDel, redisGetString } from "./redis";
+import { EVENT_TYPES, WAITING_PLAYER_KEY } from "./constants.ts";
+import { publishToPlayer } from "./broadcast.ts";
+import { clearPlayerGame, deleteGameState, getGameState, getPlayerGameId } from "./game-state.ts";
+import { redisDel, redisGetString } from "./redis.ts";
 
 export const handlePlayerDisconnect = async (playerId: string): Promise<void> => {
   const waitingPlayer = await redisGetString(WAITING_PLAYER_KEY);

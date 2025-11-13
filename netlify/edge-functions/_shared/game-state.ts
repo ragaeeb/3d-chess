@@ -3,8 +3,8 @@ import {
   GAME_TTL_SECONDS,
   PLAYER_GAME_KEY,
   PLAYER_GAME_TTL_SECONDS,
-} from "./constants";
-import { redisDel, redisGetJson, redisGetString, redisSetJson, redisSetString } from "./redis";
+} from "./constants.ts";
+import { redisDel, redisGetJson, redisGetString, redisSetJson, redisSetString } from "./redis.ts";
 
 export interface GameState {
   id: string;
