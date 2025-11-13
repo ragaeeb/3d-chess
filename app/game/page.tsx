@@ -7,6 +7,11 @@ import { Chess, type Square } from "chess.js";
 import ChessBoard from "@/components/3d/chessBoard";
 import GameStatusPanel from "@/components/GameStatusPanel";
 import { INIT_GAME, MOVE, OPPONENT_LEFT, GAME_OVER, ERROR, KEEPALIVE } from "@/types/socket";
+import {
+  joinMultiplayerQueue,
+  openMultiplayerStream,
+  submitMultiplayerMove,
+} from "@/lib/multiplayerClient";
 import type { ChessMove, GameStatus, SocketMessage } from "@/types/game";
 
 const GamePage: React.FC = () => {
@@ -124,7 +129,7 @@ const GamePage: React.FC = () => {
   );
 
   useEffect(() => {
-    const eventSource = new EventSource(`/api/game/stream?playerId=${playerId}`);
+    const eventSource = openMultiplayerStream(playerId);
     eventSourceRef.current = eventSource;
 
     eventSource.onopen = () => {
@@ -176,26 +181,28 @@ const GamePage: React.FC = () => {
     setGameStatus("waiting-opponent");
 
     try {
-      const response = await fetch("/api/game/join", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ playerId }),
-      });
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ error: "Failed to join queue" }));
-        setMessage(error.error ?? "Failed to join queue");
-        setGameStatus("not-started");
-      } else {
-        const result = await response.json();
-        if (result.status === "alreadyPlaying") {
-          setGameStatus("started");
-        } else if (result.status === "waiting") {
-          setMessage("Waiting for an opponent...");
-        }
+      const result = await joinMultiplayerQueue(playerId);
+      if (result.status === "alreadyPlaying") {
+        setGameStatus("started");
+      } else if (result.status === "waiting") {
+        setMessage("Waiting for an opponent...");
       }
     } catch (error) {
       console.error(error);
-      setMessage("Unable to join the queue. Please try again.");
+      if (error instanceof Error) {
+        try {
+          const parsed = JSON.parse(error.message);
+          if (parsed?.error) {
+            setMessage(parsed.error);
+          } else {
+            setMessage("Unable to join the queue. Please try again.");
+          }
+        } catch {
+          setMessage("Unable to join the queue. Please try again.");
+        }
+      } else {
+        setMessage("Unable to join the queue. Please try again.");
+      }
       setGameStatus("not-started");
     }
   }, [isConnected, playerId, resetBoard]);
@@ -234,11 +241,7 @@ const GamePage: React.FC = () => {
         setMessage(null);
         updateBannerFromGame();
 
-        fetch("/api/game/move", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ playerId, move }),
-        }).catch((error) => {
+        submitMultiplayerMove(playerId, move).catch((error) => {
           console.error(error);
           setMessage("Failed to send move to server");
         });
