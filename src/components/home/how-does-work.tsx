@@ -30,7 +30,7 @@ const HowDoesWork = () => {
             </div>
             <h3 className="text-2xl font-bold text-gray-900 mb-4 text-center">Smart Matching</h3>
             <p className="text-gray-600 text-center leading-relaxed">
-              Our intelligent queue system instantly checks for available opponents. If someone's waiting, you're matched immediately!
+              Our intelligent queue system instantly checks for available opponents. If someone’s waiting, you’re matched immediately!
             </p>
           </div>
 
@@ -40,7 +40,7 @@ const HowDoesWork = () => {
             </div>
             <h3 className="text-2xl font-bold text-gray-900 mb-4 text-center">Instant Game</h3>
             <p className="text-gray-600 text-center leading-relaxed">
-              Games start the moment you're matched! Server-Sent Events stream every update in real time, keeping both boards perfectly in sync.
+              Games start the moment you’re matched! Server-Sent Events stream every update in real time, keeping both boards perfectly in sync.
             </p>
           </div>
         </div>
@@ -59,7 +59,7 @@ const HowDoesWork = () => {
                 </div>
                 <div>
                   <h4 className="text-lg font-semibold text-gray-900 mb-2">Opponent Available</h4>
-                  <p className="text-gray-600">When you click play and someone is already in the queue, you're instantly matched and the 3D chess battle begins!</p>
+                  <p className="text-gray-600">When you click play and someone is already in the queue, you’re instantly matched and the 3D chess battle begins!</p>
                 </div>
               </div>
 
@@ -69,7 +69,7 @@ const HowDoesWork = () => {
                 </div>
                 <div>
                   <h4 className="text-lg font-semibold text-gray-900 mb-2">Waiting Mode</h4>
-                  <p className="text-gray-600">No one in queue? No problem! You'll wait comfortably while our system actively searches for your perfect opponent.</p>
+                  <p className="text-gray-600">No one in queue? No problem! You’ll wait comfortably while our system actively searches for your perfect opponent.</p>
                 </div>
               </div>
             </div>

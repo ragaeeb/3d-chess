@@ -1,12 +1,12 @@
 import type { Piece, Square } from "chess.js";
-import type { ERROR, GAME_OVER, INIT_GAME, MOVE, OPPONENT_LEFT } from "./socket";
+import type { ServerMessageType } from "./socket";
 
 export type GameStatus = "not-started" | "waiting-opponent" | "started";
 
 export type MovePayload = { from: string; to: string };
 
 export type SocketMessage = {
-  type: typeof INIT_GAME | typeof MOVE | typeof OPPONENT_LEFT | typeof GAME_OVER | typeof ERROR;
+  type: ServerMessageType;
   payload?: any;
 };
 

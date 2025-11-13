@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Chess, type Square } from "chess.js";
 
@@ -10,30 +10,53 @@ import { INIT_GAME, MOVE, OPPONENT_LEFT, GAME_OVER, ERROR, KEEPALIVE } from "@/t
 import type { ChessMove, GameStatus, SocketMessage } from "@/types/game";
 
 const GamePage: React.FC = () => {
-  const playerIdRef = useRef<string>();
-  if (!playerIdRef.current) {
-    playerIdRef.current = crypto.randomUUID();
-  }
-  const playerId = playerIdRef.current;
+  const [playerId] = useState(() => crypto.randomUUID());
 
   const eventSourceRef = useRef<EventSource | null>(null);
-  const gameRef = useRef(new Chess());
+  const [game] = useState(() => new Chess());
 
   const [isConnected, setIsConnected] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [gameStatus, setGameStatus] = useState<GameStatus>("not-started");
   const [playerColor, setPlayerColor] = useState<string | null>(null);
   const [bannerMessage, setBannerMessage] = useState<string | null>(null);
-  const [lastFen, setLastFen] = useState(gameRef.current.fen());
+  const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [lastMove, setLastMove] = useState<ChessMove | null>(null);
-
-  const board = useMemo(() => gameRef.current.board(), [lastFen]);
+  const [board, setBoard] = useState(() => game.board());
 
   const resetBoard = useCallback(() => {
-    gameRef.current.reset();
-    setLastFen(gameRef.current.fen());
+    game.reset();
+    setBoard(game.board());
     setLastMove(null);
-  }, []);
+    if (bannerTimeoutRef.current) {
+      clearTimeout(bannerTimeoutRef.current);
+      bannerTimeoutRef.current = null;
+    }
+    setBannerMessage(null);
+  }, [game]);
+
+  const updateBannerFromGame = useCallback(() => {
+    if (bannerTimeoutRef.current) {
+      clearTimeout(bannerTimeoutRef.current);
+      bannerTimeoutRef.current = null;
+    }
+
+    if (game.isCheckmate()) {
+      setBannerMessage("Checkmate");
+      return;
+    }
+
+    if (game.isCheck()) {
+      setBannerMessage("Check");
+      bannerTimeoutRef.current = setTimeout(() => {
+        setBannerMessage(null);
+        bannerTimeoutRef.current = null;
+      }, 2000);
+      return;
+    }
+
+    setBannerMessage(null);
+  }, [game]);
 
   const handleServerMessage = useCallback(
     (data: SocketMessage) => {
@@ -48,7 +71,7 @@ const GamePage: React.FC = () => {
         }
         case MOVE: {
           if (data.payload?.from && data.payload?.to) {
-            const moveResult = gameRef.current.move({
+            const moveResult = game.move({
               from: data.payload.from as Square,
               to: data.payload.to as Square,
               promotion: "q",
@@ -58,7 +81,8 @@ const GamePage: React.FC = () => {
                 from: data.payload.from as Square,
                 to: data.payload.to as Square,
               });
-              setLastFen(gameRef.current.fen());
+              setBoard(game.board());
+              updateBannerFromGame();
             }
           }
           break;
@@ -78,6 +102,10 @@ const GamePage: React.FC = () => {
           } else {
             setBannerMessage("Game Over");
           }
+          if (bannerTimeoutRef.current) {
+            clearTimeout(bannerTimeoutRef.current);
+            bannerTimeoutRef.current = null;
+          }
           setGameStatus("not-started");
           setPlayerColor(null);
           break;
@@ -92,7 +120,7 @@ const GamePage: React.FC = () => {
           break;
       }
     },
-    [resetBoard],
+    [game, resetBoard, updateBannerFromGame],
   );
 
   useEffect(() => {
@@ -127,21 +155,13 @@ const GamePage: React.FC = () => {
       setIsConnected(false);
       setPlayerColor(null);
       setGameStatus("not-started");
+      if (bannerTimeoutRef.current) {
+        clearTimeout(bannerTimeoutRef.current);
+        bannerTimeoutRef.current = null;
+      }
+      setBannerMessage(null);
     };
   }, [playerId, handleServerMessage]);
-
-  useEffect(() => {
-    if (gameRef.current.isCheckmate()) {
-      setBannerMessage("Checkmate");
-      return;
-    }
-    if (gameRef.current.isCheck()) {
-      setBannerMessage("Check");
-      const timeout = setTimeout(() => setBannerMessage(null), 2000);
-      return () => clearTimeout(timeout);
-    }
-    setBannerMessage(null);
-  }, [lastFen, gameStatus]);
 
   const handleStartGame = useCallback(async () => {
     if (!isConnected) {
@@ -187,22 +207,22 @@ const GamePage: React.FC = () => {
       }
 
       const expectedTurn = playerColor === "white" ? "w" : "b";
-      if (gameRef.current.turn() !== expectedTurn) {
+      if (game.turn() !== expectedTurn) {
         setMessage("It isn't your turn yet.");
         return;
       }
 
-      const availableMoves = gameRef.current.moves({ square: move.from as Square, verbose: true });
+      const availableMoves = game.moves({ square: move.from as Square, verbose: true });
       const isLegalDestination = availableMoves.some((m) => m.to === move.to);
       if (!isLegalDestination) {
         setMessage("Illegal move");
         return;
       }
 
-      const targetSquare = gameRef.current.get(move.to as Square);
+      const targetSquare = game.get(move.to as Square);
       const captured = targetSquare ? targetSquare.type : undefined;
 
-      const result = gameRef.current.move({
+      const result = game.move({
         from: move.from as Square,
         to: move.to as Square,
         promotion: "q",
@@ -210,8 +230,9 @@ const GamePage: React.FC = () => {
 
       if (result) {
         setLastMove({ from: move.from as Square, to: move.to as Square, captured });
-        setLastFen(gameRef.current.fen());
+        setBoard(game.board());
         setMessage(null);
+        updateBannerFromGame();
 
         fetch("/api/game/move", {
           method: "POST",
@@ -223,15 +244,15 @@ const GamePage: React.FC = () => {
         });
       }
     },
-    [gameStatus, playerColor, playerId],
+    [game, gameStatus, playerColor, playerId, updateBannerFromGame],
   );
 
   const getLegalMoves = useCallback((square: Square): Square[] => {
-    const moves = gameRef.current.moves({ square, verbose: true });
+    const moves = game.moves({ square, verbose: true });
     return moves.map((move) => move.to as Square);
-  }, []);
+  }, [game]);
 
-  const turn = gameRef.current.turn();
+  const turn = game.turn();
 
   return (
     <div className="relative h-screen">
