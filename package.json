@@ -1,39 +1,50 @@
 {
-  "name": "3d-chess",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "biome check ."
-  },
-  "dependencies": {
-    "@react-spring/core": "^10.0.3",
-    "@react-spring/three": "^10.0.3",
-    "@react-three/drei": "^10.7.7",
-    "@react-three/fiber": "^9.4.0",
-    "chess.js": "^1.4.0",
-    "clsx": "^2.1.1",
-    "framer-motion": "^12.23.24",
-    "lucide-react": "^0.553.0",
-    "next": "16.0.3",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "three": "^0.181.1"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "^2.3.5",
-    "@semantic-release/changelog": "^6.0.3",
-    "@semantic-release/git": "^10.0.1",
-    "@tailwindcss/postcss": "^4.1.17",
-    "@types/bun": "^1.3.2",
-    "@types/node": "^24.10.1",
-    "@types/react": "^19.2.4",
-    "@types/react-dom": "^19.2.3",
-    "autoprefixer": "^10.4.22",
-    "postcss": "^8.5.6",
-    "semantic-release": "^25.0.2",
-    "tailwindcss": "^4.1.17",
-    "typescript": "^5.9.3"
-  }
+    "author": "Ragaeeb Haq",
+    "bugs": {
+        "url": "https://github.com/ragaeeb/3d-chess/issues"
+    },
+    "engines": {
+        "bun": ">=1.3.2",
+        "node": ">=22.x"
+    },
+    "version": "0.1.0",
+    "name": "3d-chess",
+    "private": true,
+    "homepage": "https://github.com/ragaeeb/3d-chess",
+    "license": "MIT",
+    "scripts": {
+        "dev": "next dev",
+        "build": "next build",
+        "start": "next start",
+        "lint": "biome check ."
+    },
+    "dependencies": {
+        "@react-spring/core": "^10.0.3",
+        "@react-spring/three": "^10.0.3",
+        "@react-three/drei": "^10.7.7",
+        "@react-three/fiber": "^9.4.0",
+        "chess.js": "^1.4.0",
+        "clsx": "^2.1.1",
+        "framer-motion": "^12.23.24",
+        "lucide-react": "^0.553.0",
+        "next": "16.0.3",
+        "react": "^19.2.0",
+        "react-dom": "^19.2.0",
+        "three": "^0.181.1"
+    },
+    "devDependencies": {
+        "@biomejs/biome": "^2.3.5",
+        "@semantic-release/changelog": "^6.0.3",
+        "@semantic-release/git": "^10.0.1",
+        "@tailwindcss/postcss": "^4.1.17",
+        "@types/bun": "^1.3.2",
+        "@types/node": "^24.10.1",
+        "@types/react": "^19.2.4",
+        "@types/react-dom": "^19.2.3",
+        "autoprefixer": "^10.4.22",
+        "postcss": "^8.5.6",
+        "semantic-release": "^25.0.2",
+        "tailwindcss": "^4.1.17",
+        "typescript": "^5.9.3"
+    }
 }
