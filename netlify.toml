@@ -1,0 +1,13 @@
+[[edge_functions]]
+function = "game-stream"
+path = "/api/game/stream"
+
+[[edge_functions]]
+function = "game-join"
+path = "/api/game/join"
+method = "POST"
+
+[[edge_functions]]
+function = "game-move"
+path = "/api/game/move"
+method = "POST"
