@@ -1,0 +1,19 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.3.5/schema.json",
+	"files": {
+		"includes": [
+			"app/api/game/**/*",
+			"src/lib/**/*",
+			"tests/**/*",
+			"tsconfig.json",
+			"biome.json"
+		]
+	},
+	"formatter": {
+		"enabled": true
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {}
+	}
+}
