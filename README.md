@@ -36,21 +36,25 @@ An immersive multiplayer 3D chess experience built with Next.js 16 and Bun. The 
    bun install
    ```
 
-2. Run the development server:
+2. Copy `.env.example` to `.env.local` (see the environment variables section below) and fill in your Pusher credentials.
+
+3. Run the standard Next.js development server:
 
    ```bash
    bun run dev
    ```
 
-3. Copy `.env.example` to `.env.local` (see the environment variables section below) and start the Netlify dev server to proxy functions locally:
+   The app now exposes the Netlify handlers under `/.netlify/functions/*` even in `next dev`, so realtime matchmaking and moves work at [http://localhost:3000](http://localhost:3000).
+
+4. (Optional) Start the Netlify dev server for a full parity test, including Netlify's local Functions emulator:
 
    ```bash
    netlify dev
    ```
 
-   This command runs Next.js on port `8888` with the Netlify Functions emulator so realtime moves flow through the new Pusher-powered endpoints.
+   This command proxies the same `/.netlify/functions/*` endpoints through Netlify's simulator and serves the app on port `8888`.
 
-4. Open [http://localhost:8888](http://localhost:8888) to view the app. Navigate to `/game` to join a multiplayer match in two browser windows.
+5. Open `/game` in two browser windows to verify realtime play locally.
 
 ## Environment Variables
 

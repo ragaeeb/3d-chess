@@ -9,8 +9,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import ChessBoard from '@/components/3d/chessBoard';
 import GameStatusPanel from '@/components/GameStatusPanel';
 import { createPusherClient } from '@/lib/pusherClient';
-import { GAME_OVER, INIT_GAME, MOVE, OPPONENT_LEFT } from '@/types/socket';
 import type { ChessMove, GameStatus } from '@/types/game';
+import { GAME_OVER, INIT_GAME, MOVE, OPPONENT_LEFT } from '@/types/socket';
 
 type GameStartPayload = {
     status: 'matched' | 'already-playing';
