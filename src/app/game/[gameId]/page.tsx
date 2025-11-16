@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import ChessBoard from '@/components/3d/chessBoard';
 import GameStatusPanel from '@/components/GameStatusPanel';
 import ShareGameLink from '@/components/ShareGameLink';
+import { ensurePlayerId } from '@/lib/playerIdentity';
 import { createPusherClient } from '@/lib/pusherClient';
 import type { ChessMove, GameStatus, PlayerRole } from '@/types/game';
 import { GAME_OVER, INIT_GAME, MOVE, OPPONENT_LEFT } from '@/types/socket';
@@ -36,7 +37,7 @@ type ConnectionState = 'connected' | 'connecting' | 'disconnected';
 const GamePage: React.FC = () => {
     const params = useParams();
     const gameId = params.gameId as string;
-    const [playerId] = useState(() => crypto.randomUUID());
+    const [playerId, setPlayerId] = useState<string | null>(null);
     const [game] = useState(() => new Chess());
     const [board, setBoard] = useState(() => game.board());
     const [lastMove, setLastMove] = useState<ChessMove | null>(null);
@@ -55,6 +56,10 @@ const GamePage: React.FC = () => {
 
     const isConnected = connectionState === 'connected';
     const isSpectator = role === 'spectator';
+
+    useEffect(() => {
+        setPlayerId(ensurePlayerId());
+    }, []);
 
     const clearBanner = useCallback(() => {
         if (bannerTimeoutRef.current) {
@@ -109,7 +114,7 @@ const GamePage: React.FC = () => {
     }, [pusherClient]);
 
     const notifyLeave = useCallback(() => {
-        if (!gameId) {
+        if (!gameId || !playerId) {
             return;
         }
 
@@ -243,6 +248,10 @@ const GamePage: React.FC = () => {
     );
 
     useEffect(() => {
+        if (!playerId) {
+            return;
+        }
+
         let client: Pusher | null = null;
 
         try {
@@ -271,7 +280,7 @@ const GamePage: React.FC = () => {
     }, [playerId]);
 
     useEffect(() => {
-        if (!pusherClient) {
+        if (!pusherClient || !playerId) {
             return;
         }
 
@@ -294,7 +303,7 @@ const GamePage: React.FC = () => {
     }, [playerId, pusherClient, startMatch]);
 
     useEffect(() => {
-        if (!gameId || !pusherClient) {
+        if (!gameId || !pusherClient || !playerId) {
             return;
         }
 
@@ -385,7 +394,7 @@ const GamePage: React.FC = () => {
                 return;
             }
 
-            if (gameStatus !== 'started' || !playerColor) {
+            if (gameStatus !== 'started' || !playerColor || !playerId) {
                 return;
             }
 

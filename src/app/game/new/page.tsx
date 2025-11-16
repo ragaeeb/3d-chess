@@ -1,23 +1,32 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+
+import { ensurePlayerId, persistPlayerId } from '@/lib/playerIdentity';
 
 export default function NewGamePage() {
     const router = useRouter();
-    const [playerId] = useState(() => crypto.randomUUID());
+    const [playerId, setPlayerId] = useState<string | null>(null);
     const [creating, setCreating] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        setPlayerId(ensurePlayerId());
+    }, []);
 
     const createGame = async () => {
         setCreating(true);
         setError(null);
 
         try {
+            const id = playerId ?? ensurePlayerId();
+            setPlayerId(persistPlayerId(id));
+
             const res = await fetch('/.netlify/functions/move', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'create', playerId }),
+                body: JSON.stringify({ action: 'create', playerId: id }),
             });
 
             if (!res.ok) {
@@ -43,7 +52,7 @@ export default function NewGamePage() {
                 )}
                 <button
                     onClick={createGame}
-                    disabled={creating}
+                    disabled={creating || !playerId}
                     className="rounded-xl bg-gradient-to-b from-[#d3d3ad] to-[#315a22] px-8 py-4 text-lg font-bold text-white transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                     {creating ? 'Creating...' : 'Create Game'}
