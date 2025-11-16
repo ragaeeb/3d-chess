@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
-import { handler } from './move';
-import { __resetMemoryStore } from './utils/gameStore';
-import { setServerPusher } from './utils/pusher';
+import { handler } from '../move';
+import { __resetMemoryStore } from '../utils/gameStore';
+import { setServerPusher } from '../utils/pusher';
 
 type JsonEventMethod = 'POST' | 'OPTIONS';
 

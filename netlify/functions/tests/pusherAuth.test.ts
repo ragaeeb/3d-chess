@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
-import { handler as authHandler } from './pusherAuth';
-import { __resetMemoryStore, saveGameRecord, setAssignment } from './utils/gameStore';
-import type { GameRecord } from './utils/gameStore';
-import { setServerPusher } from './utils/pusher';
+import { handler as authHandler } from '../pusherAuth';
+import { __resetMemoryStore, saveGameRecord, setAssignment } from '../utils/gameStore';
+import type { GameRecord } from '../utils/gameStore';
+import { setServerPusher } from '../utils/pusher';
 
 const jsonEvent = (body: string, headers: Record<string, string> = { 'content-type': 'application/json' }) => ({
     httpMethod: 'POST',
