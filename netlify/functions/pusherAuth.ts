@@ -1,4 +1,4 @@
-import { getAssignment } from './utils/gameStore';
+import { getAssignment, getGameRecord } from './utils/gameStore';
 import type { NetlifyEvent, NetlifyResponse } from './utils/http';
 import { getCorsHeaders, jsonResponse, textResponse } from './utils/http';
 import { getServerPusher } from './utils/pusher';
@@ -69,15 +69,22 @@ export const handler = async (event: NetlifyEvent): Promise<NetlifyResponse> => 
     if (channelName.startsWith("private-game-") || channelName.startsWith("presence-game-")) {
       const suffix = channelName.replace(/^(private|presence)-game-/, "");
       const assignment = await getAssignment(playerId);
+      const game = await getGameRecord(suffix);
 
-      if (!assignment || assignment.gameId !== suffix) {
+      const isPlayer = Boolean(assignment && assignment.gameId === suffix);
+      const isSpectator = Boolean(game && game.spectators.includes(playerId));
+
+      if (!isPlayer && !isSpectator) {
         return jsonResponse(403, { error: "Player is not part of this game" });
       }
 
       if (channelName.startsWith("presence-game-")) {
         const auth = pusher.authorizeChannel(socketId, channelName, {
           user_id: playerId,
-          user_info: { color: assignment.color },
+          user_info: {
+            color: assignment?.color ?? null,
+            role: isSpectator ? 'spectator' : assignment?.color,
+          },
         });
         return {
           statusCode: 200,

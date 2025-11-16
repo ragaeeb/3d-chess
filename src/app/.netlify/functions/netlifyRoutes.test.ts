@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import * as moveRoute from '../../app/.netlify/functions/move/route';
-import * as authRoute from '../../app/.netlify/functions/pusherAuth/route';
-import { __resetMemoryStore } from '../../netlify/functions/utils/gameStore';
-import { setServerPusher } from '../../netlify/functions/utils/pusher';
+import * as moveRoute from './move/route';
+import * as authRoute from './pusherAuth/route';
+import { __resetMemoryStore } from '../../../netlify/functions/utils/gameStore';
+import { setServerPusher } from '../../../netlify/functions/utils/pusher';
 
 const createPusherMock = () => ({ trigger: mock(async () => {}), authorizeChannel: mock(() => ({ auth: 'ok' })) });
 

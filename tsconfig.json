@@ -16,7 +16,8 @@
         "types": ["node"],
         "baseUrl": ".",
         "paths": {
-            "@/*": ["src/*"]
+            "@/*": ["src/*"],
+            "netlify/*": ["netlify/*"]
         },
         "plugins": [
             {

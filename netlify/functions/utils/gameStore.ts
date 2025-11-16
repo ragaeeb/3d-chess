@@ -5,9 +5,10 @@ export type PlayerColor = 'white' | 'black';
 export type GameRecord = {
     id: string;
     fen: string;
-    players: Record<PlayerColor, string>;
+    players: { white: string; black: string | null };
+    spectators: string[];
     lastUpdated: number;
-    status: 'active' | 'finished';
+    status: 'waiting' | 'active' | 'finished';
 };
 
 export type PlayerAssignment = {
@@ -77,7 +78,9 @@ const cleanupMemoryStore = () => {
         if (now - record.lastUpdated > STALE_MEMORY_WINDOW_MS) {
             memoryStore.games.delete(gameId);
             memoryStore.assignments.delete(record.players.white);
-            memoryStore.assignments.delete(record.players.black);
+            if (record.players.black) {
+                memoryStore.assignments.delete(record.players.black);
+            }
         }
     }
 };
@@ -136,6 +139,54 @@ redis.call('SET', KEYS[1], cjson.encode(decoded), 'EX', ARGV[3])
 return 1
 `;
 
+const JOIN_GAME_LUA = `
+local gameKey = KEYS[1]
+local playerId = ARGV[1]
+local lastUpdated = tonumber(ARGV[2])
+local ttl = tonumber(ARGV[3])
+
+local record = redis.call('GET', gameKey)
+if not record then
+  return cjson.encode({ status = 'not_found' })
+end
+
+local decoded = cjson.decode(record)
+
+if decoded.players and decoded.players.white == playerId then
+  return cjson.encode({ status = 'existing', color = 'white' })
+end
+
+if decoded.players and decoded.players.black == playerId then
+  return cjson.encode({ status = 'existing', color = 'black' })
+end
+
+decoded.spectators = decoded.spectators or {}
+
+if decoded.status == 'active' or decoded.players.black then
+  local already = false
+  for _, id in ipairs(decoded.spectators) do
+    if id == playerId then
+      already = true
+      break
+    end
+  end
+
+  if not already then
+    table.insert(decoded.spectators, playerId)
+    redis.call('SET', gameKey, cjson.encode(decoded), 'EX', ttl)
+  end
+
+  return cjson.encode({ status = 'spectator' })
+end
+
+decoded.players.black = playerId
+decoded.status = 'active'
+decoded.lastUpdated = lastUpdated
+
+redis.call('SET', gameKey, cjson.encode(decoded), 'EX', ttl)
+return cjson.encode({ status = 'black' })
+`;
+
 const ENSURE_GAME_LUA = `
 local existing = redis.call('GET', KEYS[1])
 if existing then
@@ -168,6 +219,31 @@ const handleRedisError = (context: string, error: unknown) => {
 };
 
 export const isRedisBacked = Boolean(redis);
+
+export type JoinGameDecision =
+    | { status: 'not_found' | 'spectator' | 'black' }
+    | { status: 'existing'; color: PlayerColor };
+
+export const joinGameAtomically = async (
+    gameId: string,
+    playerId: string,
+): Promise<JoinGameDecision | null> => {
+    cleanupMemoryStore();
+    if (!redis) {
+        return null;
+    }
+    try {
+        const result = await redis.eval(
+            JOIN_GAME_LUA,
+            [gameKey(gameId)],
+            [playerId, Date.now().toString(), GAME_TTL_SECONDS.toString()],
+        );
+        return parseStoredValue<JoinGameDecision>(result);
+    } catch (error) {
+        handleRedisError('joinGameAtomically', error);
+        return null;
+    }
+};
 
 const memoryClaimWaitingPlayer = (playerId: string): string | null => {
     cleanupMemoryStore();
@@ -335,7 +411,9 @@ const removeGameFromMemory = (gameId: string) => {
     }
     memoryStore.games.delete(gameId);
     memoryStore.assignments.delete(record.players.white);
-    memoryStore.assignments.delete(record.players.black);
+    if (record.players.black) {
+        memoryStore.assignments.delete(record.players.black);
+    }
 };
 
 export const removeGameRecord = async (gameId: string) => {
