@@ -6,7 +6,10 @@ import { OrbitControls } from "@react-three/drei";
 import { useSpring } from "@react-spring/core";
 import { a } from "@react-spring/three";
 import type { Piece, Square } from "chess.js";
-import { Suspense, useCallback, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useThree } from "@react-three/fiber";
+import { Vector3 } from "three";
+import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import type { AnimatedPieceProps, ChessBoardProps } from "@/types/game";
 import Lights from "./lights";
 import { BishopModel, KingModel, KnightModel, PawnModel, QueenModel, RookModel } from "../models";
@@ -63,6 +66,43 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
   isSpectator = false,
 }) => {
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
+  const controlsRef = useRef<OrbitControlsImpl>(null);
+  const { camera } = useThree();
+
+  useEffect(() => {
+    if (!playerColor || gameStatus !== "started") {
+      return;
+    }
+
+    const targetPosition =
+      playerColor === "black" ? new Vector3(0, 8, -8) : new Vector3(0, 8, 8);
+    const startPosition = camera.position.clone();
+    const startTarget = controlsRef.current?.target.clone() ?? new Vector3(0, 0, 0);
+    const lookAtTarget = new Vector3(0, 0, 0);
+    const duration = 800;
+    let animationFrame = 0;
+    const startTime = performance.now();
+
+    const animate = () => {
+      const elapsed = performance.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      camera.position.lerpVectors(startPosition, targetPosition, progress);
+      camera.lookAt(lookAtTarget);
+
+      if (controlsRef.current) {
+        controlsRef.current.target.lerpVectors(startTarget, lookAtTarget, progress);
+        controlsRef.current.update();
+      }
+
+      if (progress < 1) {
+        animationFrame = requestAnimationFrame(animate);
+      }
+    };
+
+    animationFrame = requestAnimationFrame(animate);
+
+    return () => cancelAnimationFrame(animationFrame);
+  }, [camera, gameStatus, playerColor]);
 
   const validMoves = useMemo(() => {
     if (!selectedSquare) return [];
@@ -173,7 +213,7 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
 
   return (
     <>
-      <OrbitControls makeDefault minDistance={2} />
+      <OrbitControls ref={controlsRef} makeDefault minDistance={2} />
       <Lights />
       <mesh receiveShadow position={[0, -0.16, 0]}>
         <boxGeometry args={[8.8, 0.3, 8.8]} />
