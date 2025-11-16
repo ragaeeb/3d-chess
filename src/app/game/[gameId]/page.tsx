@@ -15,6 +15,10 @@ import { createPusherClient } from '@/lib/pusherClient';
 import type { ChessMove, GameStatus, PlayerRole } from '@/types/game';
 import { GAME_OVER, INIT_GAME, MOVE, OPPONENT_LEFT } from '@/types/socket';
 
+type PresenceMember = { id: string; info?: { role?: string | null } };
+
+const OPPONENT_DISCONNECTED_COPY = 'Your opponent disconnected.';
+
 type GameStartPayload = {
     status: 'matched' | 'already-playing';
     gameId: string;
@@ -55,6 +59,7 @@ const GamePage: React.FC = () => {
     const gameChannelRef = useRef<Channel | null>(null);
     const presenceChannelRef = useRef<PresenceChannel | null>(null);
     const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const opponentDisconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const isConnected = connectionState === 'connected';
     const isSpectator = role === 'spectator';
@@ -103,6 +108,14 @@ const GamePage: React.FC = () => {
         setBannerMessage(null);
     }, [game]);
 
+    const clearPendingOpponentDisconnect = useCallback(() => {
+        if (opponentDisconnectTimeoutRef.current) {
+            clearTimeout(opponentDisconnectTimeoutRef.current);
+            opponentDisconnectTimeoutRef.current = null;
+        }
+        setMessage((current) => (current === OPPONENT_DISCONNECTED_COPY ? null : current));
+    }, [setMessage]);
+
     const cleanupChannels = useCallback(() => {
         if (pusherClient && gameChannelRef.current) {
             gameChannelRef.current.unbind_all();
@@ -115,7 +128,8 @@ const GamePage: React.FC = () => {
             pusherClient.unsubscribe(presenceChannelRef.current.name);
             presenceChannelRef.current = null;
         }
-    }, [pusherClient]);
+        clearPendingOpponentDisconnect();
+    }, [clearPendingOpponentDisconnect, pusherClient]);
 
     const notifyLeave = useCallback(() => {
         if (!gameId || !playerId) {
@@ -205,9 +219,14 @@ const GamePage: React.FC = () => {
 
     const subscribeToGameChannels = useCallback(
         (client: Pusher, nextGameId: string) => {
+            const privateChannelName = `private-game-${nextGameId}`;
+            if (gameChannelRef.current?.name === privateChannelName) {
+                return;
+            }
+
             cleanupChannels();
 
-            const privateChannel = client.subscribe(`private-game-${nextGameId}`);
+            const privateChannel = client.subscribe(privateChannelName);
             gameChannelRef.current = privateChannel;
 
             privateChannel.bind(MOVE, handleIncomingMove);
@@ -217,13 +236,32 @@ const GamePage: React.FC = () => {
             const presenceChannel = client.subscribe(`presence-game-${nextGameId}`) as PresenceChannel;
             presenceChannelRef.current = presenceChannel;
 
-            presenceChannel.bind('pusher:member_removed', (member: { id: string }) => {
-                if (member?.id && member.id !== playerId) {
-                    setMessage('Your opponent disconnected.');
+            presenceChannel.bind('pusher:member_removed', (member: PresenceMember) => {
+                if (member?.id && member.id !== playerId && member?.info?.role !== 'spectator') {
+                    if (opponentDisconnectTimeoutRef.current) {
+                        clearTimeout(opponentDisconnectTimeoutRef.current);
+                    }
+                    opponentDisconnectTimeoutRef.current = setTimeout(() => {
+                        setMessage(OPPONENT_DISCONNECTED_COPY);
+                    }, 1200);
+                }
+            });
+
+            presenceChannel.bind('pusher:member_added', (member: PresenceMember) => {
+                if (member?.id && member.id !== playerId && member?.info?.role !== 'spectator') {
+                    clearPendingOpponentDisconnect();
                 }
             });
         },
-        [cleanupChannels, handleGameOver, handleIncomingMove, handleOpponentLeft, playerId],
+        [
+            cleanupChannels,
+            clearPendingOpponentDisconnect,
+            handleGameOver,
+            handleIncomingMove,
+            handleOpponentLeft,
+            playerId,
+            setMessage,
+        ],
     );
 
     const startMatch = useCallback(
