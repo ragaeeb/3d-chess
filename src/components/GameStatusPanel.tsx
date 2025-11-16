@@ -10,7 +10,6 @@ type GameStatusPanelProps = {
     gameStatus: GameStatus;
     playerColor: string | null;
     role: PlayerRole | null;
-    handleStartGame: () => void;
     turn: string;
 };
 
@@ -20,7 +19,6 @@ const GameStatusPanel: React.FC<GameStatusPanelProps> = ({
     gameStatus,
     playerColor,
     role,
-    handleStartGame,
     turn,
 }) => {
     const [open, setOpen] = useState(true);
@@ -187,20 +185,6 @@ const GameStatusPanel: React.FC<GameStatusPanelProps> = ({
                                         </div>
                                     </div>
                                 )}
-                            </div>
-                            <div className="space-y-3">
-                                <button
-                                    type="button"
-                                    onClick={handleStartGame}
-                                    disabled={!isConnected || gameStatus !== 'not-started'}
-                                    className={`w-full transform rounded-xl px-6 py-4 font-bold text-white/90 transition-all duration-300 ${
-                                        !isConnected || gameStatus !== 'not-started'
-                                            ? 'cursor-not-allowed bg-gray-600/50 opacity-50'
-                                            : 'bg-gradient-to-b from-[#d3d3ad] to-[#315a22] hover:scale-105 hover:from-[#FFFFF0] hover:to-[#5d9948] hover:shadow-[#5d9948]/25 hover:shadow-xl active:scale-95'
-                                    }`}
-                                >
-                                    {gameStatus === 'not-started' ? 'Start Game' : 'Game in Progress'}
-                                </button>
                             </div>
                         </motion.div>
                     )}

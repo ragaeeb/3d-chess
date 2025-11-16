@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
-import { ensurePlayerId, persistPlayerId } from '@/lib/playerIdentity';
+import { ensurePlayerId } from '@/lib/playerIdentity';
 
 export default function NewGamePage() {
     const router = useRouter();
@@ -16,17 +16,17 @@ export default function NewGamePage() {
     }, []);
 
     const createGame = async () => {
+        if (!playerId) {
+            return;
+        }
         setCreating(true);
         setError(null);
 
         try {
-            const id = playerId ?? ensurePlayerId();
-            setPlayerId(persistPlayerId(id));
-
             const res = await fetch('/.netlify/functions/move', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'create', playerId: id }),
+                body: JSON.stringify({ action: 'create', playerId }),
             });
 
             if (!res.ok) {

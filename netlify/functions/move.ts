@@ -6,6 +6,8 @@ import {
     clearWaitingPlayer,
     getAssignment,
     getGameRecord,
+    isRedisBacked,
+    joinGameAtomically,
     removeAssignment,
     removeGameRecord,
     saveGameRecord,
@@ -13,7 +15,7 @@ import {
     setWaitingPlayer,
     updateGameFen,
 } from './utils/gameStore';
-import type { PlayerColor, GameRecord } from './utils/gameStore';
+import type { PlayerColor, GameRecord, JoinGameDecision } from './utils/gameStore';
 import type { NetlifyEvent, NetlifyResponse } from './utils/http';
 import { jsonResponse, textResponse } from './utils/http';
 import { getServerPusher } from './utils/pusher';
@@ -56,17 +58,57 @@ const handleCreateGame = async (playerId: string): Promise<NetlifyResponse> => {
 };
 
 const handleJoinGame = async (playerId: string, gameId: string): Promise<NetlifyResponse> => {
-    const game = await getGameRecord(gameId);
+    const respondForDecision = async (decision: JoinGameDecision, game: GameRecord) => {
+        if (decision.status === 'existing') {
+            return respond(200, { gameId, color: decision.color, fen: game.fen, status: game.status });
+        }
 
+        if (decision.status === 'spectator') {
+            return respond(200, { gameId, role: 'spectator', fen: game.fen, status: game.status });
+        }
+
+        if (decision.status === 'black') {
+            await setAssignment(playerId, { gameId, color: 'black' });
+            try {
+                await getServerPusher().trigger(`private-player-${game.players.white}`, INIT_GAME, {
+                    status: 'matched',
+                    gameId,
+                    color: 'white',
+                    fen: game.fen,
+                });
+            } catch (error) {
+                console.error('Failed to notify white player', error);
+            }
+            return respond(200, { gameId, color: 'black', fen: game.fen, status: game.status });
+        }
+
+        return respond(404, { error: 'Game not found' });
+    };
+
+    if (isRedisBacked) {
+        const decision = await joinGameAtomically(gameId, playerId);
+        if (!decision || decision.status === 'not_found') {
+            return respond(404, { error: 'Game not found' });
+        }
+
+        const record = await getGameRecord(gameId);
+        if (!record) {
+            return respond(404, { error: 'Game not found' });
+        }
+
+        return respondForDecision(decision, record);
+    }
+
+    const game = await getGameRecord(gameId);
     if (!game) {
         return respond(404, { error: 'Game not found' });
     }
 
     if (game.players.white === playerId) {
-        return respond(200, { gameId, color: 'white', fen: game.fen, status: game.status });
+        return respondForDecision({ status: 'existing', color: 'white' }, game);
     }
     if (game.players.black === playerId) {
-        return respond(200, { gameId, color: 'black', fen: game.fen, status: game.status });
+        return respondForDecision({ status: 'existing', color: 'black' }, game);
     }
 
     if (game.status === 'active' || game.players.black) {
@@ -74,27 +116,15 @@ const handleJoinGame = async (playerId: string, gameId: string): Promise<Netlify
             game.spectators.push(playerId);
             await saveGameRecord(game);
         }
-        return respond(200, { gameId, role: 'spectator', fen: game.fen, status: game.status });
+        return respondForDecision({ status: 'spectator' }, game);
     }
 
     game.players.black = playerId;
     game.status = 'active';
     game.lastUpdated = Date.now();
     await saveGameRecord(game);
-    await setAssignment(playerId, { gameId, color: 'black' });
 
-    try {
-        await getServerPusher().trigger(`private-player-${game.players.white}`, INIT_GAME, {
-            status: 'matched',
-            gameId,
-            color: 'white',
-            fen: game.fen,
-        });
-    } catch (error) {
-        console.error('Failed to notify white player', error);
-    }
-
-    return respond(200, { gameId, color: 'black', fen: game.fen, status: 'active' });
+    return respondForDecision({ status: 'black' }, game);
 };
 
 const triggerGameStart = async (
@@ -239,22 +269,24 @@ const handleLeave = async (playerId: string, targetGameId?: string): Promise<Net
     await clearWaitingPlayer(playerId);
 
     const assignment = await getAssignment(playerId);
-    const gameId = assignment?.gameId ?? targetGameId;
+    const resolvedGameId = targetGameId ?? assignment?.gameId;
 
-    if (!gameId) {
+    if (!resolvedGameId) {
         return respond(200, { status: 'ok' });
     }
 
-    const game = await getGameRecord(gameId);
+    const assignmentForResolvedGame = assignment && assignment.gameId === resolvedGameId ? assignment : null;
+
+    const game = await getGameRecord(resolvedGameId);
     if (game) {
-        if (!assignment && game.spectators.includes(playerId)) {
+        if (!assignmentForResolvedGame && game.spectators.includes(playerId)) {
             game.spectators = game.spectators.filter((id) => id !== playerId);
             await saveGameRecord(game);
             return respond(200, { status: 'left' });
         }
 
-        if (assignment) {
-            const opponentId = getOpponentId(game, assignment.color);
+        if (assignmentForResolvedGame) {
+            const opponentId = getOpponentId(game, assignmentForResolvedGame.color);
             try {
                 await getServerPusher().trigger(`private-game-${game.id}`, OPPONENT_LEFT, {
                     playerId,

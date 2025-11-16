@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, it, mock } from 'bun:test';
 
 import { handler as authHandler } from '../pusherAuth';
 import { __resetMemoryStore, saveGameRecord, setAssignment } from '../utils/gameStore';
@@ -11,16 +11,17 @@ const jsonEvent = (body: string, headers: Record<string, string> = { 'content-ty
     body,
 });
 
-let authorizeChannel: ReturnType<typeof mock<(socketId: string, channel: string, data?: unknown) => { auth: string }>>;
+type AuthorizeFn = (socketId: string, channel: string, data?: unknown) => { auth: string; data?: unknown };
+let authorizeChannel: ReturnType<typeof mock<AuthorizeFn>>;
 
 describe('pusherAuth Netlify function', () => {
     beforeEach(() => {
         __resetMemoryStore();
-        authorizeChannel = mock((socketId: string, channel: string, data?: unknown) => ({ auth: 'ok', data }));
+        authorizeChannel = mock<AuthorizeFn>((socketId: string, channel: string, data?: unknown) => ({ auth: 'ok', data }));
         setServerPusher({ trigger: mock(async () => {}), authorizeChannel });
     });
 
-    test('rejects unknown players', async () => {
+    it('should reject unknown players', async () => {
         const response = await authHandler(
             jsonEvent(JSON.stringify({ socket_id: '1', channel_name: 'private-game-game', playerId: 'missing' })),
         );
@@ -28,7 +29,7 @@ describe('pusherAuth Netlify function', () => {
         expect(JSON.parse(response.body)).toEqual({ error: 'Player is not part of this game' });
     });
 
-    test('authorizes assigned players for private channels', async () => {
+    it('should authorize assigned players for private channels', async () => {
         await setAssignment('player-a', { gameId: 'game-1', color: 'white' });
         const response = await authHandler(
             jsonEvent(JSON.stringify({ socket_id: '1', channel_name: 'private-game-game-1', playerId: 'player-a' })),
@@ -36,7 +37,7 @@ describe('pusherAuth Netlify function', () => {
         expect(response.statusCode).toBe(200);
         expect(JSON.parse(response.body)).toEqual({ auth: 'ok' });
     });
-    test('allows spectators to authorize', async () => {
+    it('should allow spectators to authorize', async () => {
         const record: GameRecord = {
             id: 'game-1',
             fen: 'start',
@@ -51,9 +52,10 @@ describe('pusherAuth Netlify function', () => {
             jsonEvent(JSON.stringify({ socket_id: '1', channel_name: 'private-game-game-1', playerId: 'spectator-a' })),
         );
         expect(response.statusCode).toBe(200);
+        expect(JSON.parse(response.body)).toEqual({ auth: 'ok' });
     });
 
-    test('passes role metadata for presence channels', async () => {
+    it('should pass role metadata for white players in presence channels', async () => {
         await setAssignment('player-a', { gameId: 'game-1', color: 'white' });
         const response = await authHandler(
             jsonEvent(JSON.stringify({ socket_id: '1', channel_name: 'presence-game-game-1', playerId: 'player-a' })),
@@ -64,6 +66,21 @@ describe('pusherAuth Netlify function', () => {
             expect.objectContaining({
                 user_id: 'player-a',
                 user_info: expect.objectContaining({ role: 'white' }),
+            }),
+        );
+    });
+
+    it('should include role metadata for black players in presence channels', async () => {
+        await setAssignment('player-b', { gameId: 'game-2', color: 'black' });
+        const response = await authHandler(
+            jsonEvent(JSON.stringify({ socket_id: '2', channel_name: 'presence-game-game-2', playerId: 'player-b' })),
+        );
+        expect(response.statusCode).toBe(200);
+        const lastCall = authorizeChannel.mock.calls.at(-1);
+        expect(lastCall?.[2]).toEqual(
+            expect.objectContaining({
+                user_id: 'player-b',
+                user_info: expect.objectContaining({ role: 'black' }),
             }),
         );
     });

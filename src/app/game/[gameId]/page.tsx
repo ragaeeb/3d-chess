@@ -482,7 +482,6 @@ const GamePage: React.FC = () => {
                 gameStatus={gameStatus}
                 playerColor={playerColor}
                 role={role}
-                handleStartGame={() => {}}
                 turn={turn}
             />
 

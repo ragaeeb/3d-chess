@@ -1,7 +1,7 @@
 'use client';
 
 import { Check, Copy, X } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type ShareGameLinkProps = {
     gameId: string;
@@ -10,6 +10,7 @@ type ShareGameLinkProps = {
 
 const ShareGameLink = ({ gameId, onClose }: ShareGameLinkProps) => {
     const [copied, setCopied] = useState(false);
+    const resetTimeoutRef = useRef<number | null>(null);
     const url = typeof window !== 'undefined' ? `${window.location.origin}/game/${gameId}` : '';
 
     const copyToClipboard = async () => {
@@ -19,11 +20,22 @@ const ShareGameLink = ({ gameId, onClose }: ShareGameLinkProps) => {
         try {
             await navigator.clipboard.writeText(url);
             setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
+            if (resetTimeoutRef.current) {
+                window.clearTimeout(resetTimeoutRef.current);
+            }
+            resetTimeoutRef.current = window.setTimeout(() => setCopied(false), 2000);
         } catch (error) {
             console.error('Failed to copy', error);
         }
     };
+
+    useEffect(() => {
+        return () => {
+            if (resetTimeoutRef.current) {
+                window.clearTimeout(resetTimeoutRef.current);
+            }
+        };
+    }, []);
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
