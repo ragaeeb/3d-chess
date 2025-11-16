@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Chess } from 'chess.js';
 import { GAME_OVER, INIT_GAME, MOVE, OPPONENT_LEFT } from '../../src/types/socket';
 import {
+    claimSeatAtomically,
     claimWaitingPlayer,
     clearWaitingPlayer,
     getAssignment,
@@ -27,7 +28,7 @@ type QueueActionResponse =
 type MoveAction = { from: string; to: string; promotion?: string };
 
 type RequestBody = {
-    action?: 'create' | 'join' | 'queue' | 'move' | 'leave';
+    action?: 'create' | 'join' | 'queue' | 'move' | 'leave' | 'claim';
     playerId?: string;
     gameId?: string;
     move?: MoveAction;
@@ -67,19 +68,14 @@ const handleJoinGame = async (playerId: string, gameId: string): Promise<Netlify
             return respond(200, { gameId, role: 'spectator', fen: game.fen, status: game.status });
         }
 
-        if (decision.status === 'black') {
-            await setAssignment(playerId, { gameId, color: 'black' });
-            try {
-                await getServerPusher().trigger(`private-player-${game.players.white}`, INIT_GAME, {
-                    status: 'matched',
-                    gameId,
-                    color: 'white',
-                    fen: game.fen,
-                });
-            } catch (error) {
-                console.error('Failed to notify white player', error);
-            }
-            return respond(200, { gameId, color: 'black', fen: game.fen, status: game.status });
+        if (decision.status === 'claimable') {
+            return respond(200, {
+                gameId,
+                role: 'spectator',
+                fen: game.fen,
+                status: game.status,
+                canPlayAsOpponent: true,
+            });
         }
 
         return respond(404, { error: 'Game not found' });
@@ -119,12 +115,113 @@ const handleJoinGame = async (playerId: string, gameId: string): Promise<Netlify
         return respondForDecision({ status: 'spectator' }, game);
     }
 
-    game.players.black = playerId;
-    game.status = 'active';
-    game.lastUpdated = Date.now();
-    await saveGameRecord(game);
+    if (!game.spectators.includes(playerId)) {
+        game.spectators.push(playerId);
+        await saveGameRecord(game);
+    }
 
-    return respondForDecision({ status: 'black' }, game);
+    return respond(200, {
+        gameId,
+        role: 'spectator',
+        fen: game.fen,
+        status: game.status,
+        canPlayAsOpponent: true,
+    });
+};
+
+const handleClaimSeat = async (playerId: string, gameId: string): Promise<NetlifyResponse> => {
+    const existingAssignment = await getAssignment(playerId);
+    if (existingAssignment && existingAssignment.gameId !== gameId) {
+        return respond(400, { error: 'Player already assigned to a different game' });
+    }
+
+    if (existingAssignment?.gameId === gameId && existingAssignment.color === 'black') {
+        const record = await getGameRecord(gameId);
+        if (!record) {
+            return respond(404, { error: 'Game not found' });
+        }
+        return respond(200, { gameId, color: 'black', fen: record.fen, status: record.status });
+    }
+
+    const respondWithGame = async (game: GameRecord | null) => {
+        if (!game) {
+            return respond(404, { error: 'Game not found' });
+        }
+
+        if (game.players.white === playerId) {
+            return respond(400, { error: 'Creator cannot claim the opponent seat' });
+        }
+
+        if (game.players.black && game.players.black !== playerId) {
+            return respond(409, { error: 'Opponent seat already taken' });
+        }
+
+        game.players.black = playerId;
+        game.status = 'active';
+        game.lastUpdated = Date.now();
+        game.spectators = game.spectators.filter((id) => id !== playerId);
+        await saveGameRecord(game);
+        await setAssignment(playerId, { gameId, color: 'black' });
+
+        try {
+            await getServerPusher().trigger(`private-player-${game.players.white}`, INIT_GAME, {
+                status: 'matched',
+                gameId,
+                color: 'white',
+                fen: game.fen,
+            });
+        } catch (error) {
+            console.error('Failed to notify white player', error);
+        }
+
+        return respond(200, { gameId, color: 'black', fen: game.fen, status: game.status });
+    };
+
+    if (isRedisBacked) {
+        const decision = await claimSeatAtomically(gameId, playerId);
+        if (!decision) {
+            return respond(500, { error: 'Failed to claim opponent seat' });
+        }
+        if (decision.status === 'not_found') {
+            return respond(404, { error: 'Game not found' });
+        }
+        if (decision.status === 'taken') {
+            return respond(409, { error: 'Opponent seat already taken' });
+        }
+        if (decision.status === 'invalid') {
+            return respond(400, { error: 'Creator cannot claim the opponent seat' });
+        }
+        if (decision.status === 'already_black') {
+            const record = await getGameRecord(gameId);
+            if (!record) {
+                return respond(404, { error: 'Game not found' });
+            }
+            await setAssignment(playerId, { gameId, color: 'black' });
+            return respond(200, { gameId, color: 'black', fen: record.fen, status: record.status });
+        }
+
+        const updatedRecord = await getGameRecord(gameId);
+        if (!updatedRecord) {
+            return respond(404, { error: 'Game not found' });
+        }
+        await setAssignment(playerId, { gameId, color: 'black' });
+
+        try {
+            await getServerPusher().trigger(`private-player-${updatedRecord.players.white}`, INIT_GAME, {
+                status: 'matched',
+                gameId,
+                color: 'white',
+                fen: updatedRecord.fen,
+            });
+        } catch (error) {
+            console.error('Failed to notify white player', error);
+        }
+
+        return respond(200, { gameId, color: 'black', fen: updatedRecord.fen, status: updatedRecord.status });
+    }
+
+    const game = await getGameRecord(gameId);
+    return respondWithGame(game);
 };
 
 const triggerGameStart = async (
@@ -349,6 +446,11 @@ export const handler = async (event: NetlifyEvent): Promise<NetlifyResponse> => 
             return handleMove(playerId, body.move);
         case 'leave':
             return handleLeave(playerId, body.gameId);
+        case 'claim':
+            if (!body.gameId) {
+                return respond(400, { error: 'Missing gameId' });
+            }
+            return handleClaimSeat(playerId, body.gameId);
         default:
             return respond(400, { error: 'Unsupported action' });
     }

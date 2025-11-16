@@ -179,12 +179,62 @@ if decoded.status == 'active' or decoded.players.black then
   return cjson.encode({ status = 'spectator' })
 end
 
+local alreadySpectating = false
+for _, id in ipairs(decoded.spectators) do
+  if id == playerId then
+    alreadySpectating = true
+    break
+  end
+end
+
+if not alreadySpectating then
+  table.insert(decoded.spectators, playerId)
+end
+
+redis.call('SET', gameKey, cjson.encode(decoded), 'EX', ttl)
+return cjson.encode({ status = 'claimable' })
+`;
+
+const CLAIM_SEAT_LUA = `
+local gameKey = KEYS[1]
+local playerId = ARGV[1]
+local lastUpdated = tonumber(ARGV[2])
+local ttl = tonumber(ARGV[3])
+
+local record = redis.call('GET', gameKey)
+if not record then
+  return cjson.encode({ status = 'not_found' })
+end
+
+local decoded = cjson.decode(record)
+
+if decoded.players and decoded.players.white == playerId then
+  return cjson.encode({ status = 'invalid' })
+end
+
+if decoded.players and decoded.players.black == playerId then
+  return cjson.encode({ status = 'already_black' })
+end
+
+if decoded.players and decoded.players.black then
+  return cjson.encode({ status = 'taken' })
+end
+
 decoded.players.black = playerId
 decoded.status = 'active'
 decoded.lastUpdated = lastUpdated
+decoded.spectators = decoded.spectators or {}
+
+local filtered = {}
+for _, id in ipairs(decoded.spectators) do
+  if id ~= playerId then
+    table.insert(filtered, id)
+  end
+end
+decoded.spectators = filtered
 
 redis.call('SET', gameKey, cjson.encode(decoded), 'EX', ttl)
-return cjson.encode({ status = 'black' })
+return cjson.encode({ status = 'claimed' })
 `;
 
 const ENSURE_GAME_LUA = `
@@ -221,8 +271,10 @@ const handleRedisError = (context: string, error: unknown) => {
 export const isRedisBacked = Boolean(redis);
 
 export type JoinGameDecision =
-    | { status: 'not_found' | 'spectator' | 'black' }
+    | { status: 'not_found' | 'spectator' | 'claimable' }
     | { status: 'existing'; color: PlayerColor };
+
+export type ClaimSeatDecision = { status: 'claimed' | 'taken' | 'not_found' | 'already_black' | 'invalid' };
 
 export const joinGameAtomically = async (
     gameId: string,
@@ -241,6 +293,27 @@ export const joinGameAtomically = async (
         return parseStoredValue<JoinGameDecision>(result);
     } catch (error) {
         handleRedisError('joinGameAtomically', error);
+        return null;
+    }
+};
+
+export const claimSeatAtomically = async (
+    gameId: string,
+    playerId: string,
+): Promise<ClaimSeatDecision | null> => {
+    cleanupMemoryStore();
+    if (!redis) {
+        return null;
+    }
+    try {
+        const result = await redis.eval(
+            CLAIM_SEAT_LUA,
+            [gameKey(gameId)],
+            [playerId, Date.now().toString(), GAME_TTL_SECONDS.toString()],
+        );
+        return parseStoredValue<ClaimSeatDecision>(result);
+    } catch (error) {
+        handleRedisError('claimSeatAtomically', error);
         return null;
     }
 };

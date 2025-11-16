@@ -16,12 +16,57 @@ import { BishopModel, KingModel, KnightModel, PawnModel, QueenModel, RookModel }
 
 const FILES = ["a", "b", "c", "d", "e", "f", "g", "h"] as const;
 
+const LOOK_AT_TARGET = new Vector3(0, 0, 0);
+const BOARD_BASE_HALF_SIZE = 4.4; // Board base is 8.8 units wide
+const BOARD_CORNERS = [
+  new Vector3(-BOARD_BASE_HALF_SIZE, 0, -BOARD_BASE_HALF_SIZE),
+  new Vector3(-BOARD_BASE_HALF_SIZE, 0, BOARD_BASE_HALF_SIZE),
+  new Vector3(BOARD_BASE_HALF_SIZE, 0, -BOARD_BASE_HALF_SIZE),
+  new Vector3(BOARD_BASE_HALF_SIZE, 0, BOARD_BASE_HALF_SIZE),
+];
+const CAMERA_DIRECTIONS = {
+  white: new Vector3(0, 1, 1).normalize(),
+  black: new Vector3(0, 1, -1).normalize(),
+} as const;
+
 const squareToPosition = (square: Square): [number, number, number] => {
   const file = square[0];
   const rank = square[1];
   const col = FILES.indexOf(file as typeof FILES[number]);
   const row = 8 - parseInt(rank, 10);
   return [col - 3.5, 0.25, row - 3.5];
+};
+
+const computeBoardViewDistance = (fov: number) => {
+  const halfFov = (Math.max(fov, 1) * Math.PI) / 360;
+  const direction = CAMERA_DIRECTIONS.white;
+
+  const exceedsFov = (distance: number) => {
+    const cameraPosition = direction.clone().multiplyScalar(distance);
+    const forward = LOOK_AT_TARGET.clone().sub(cameraPosition).normalize();
+    let maxAngle = 0;
+
+    for (const corner of BOARD_CORNERS) {
+      const vectorToCorner = corner.clone().sub(cameraPosition).normalize();
+      const angle = forward.angleTo(vectorToCorner);
+      maxAngle = Math.max(maxAngle, angle);
+    }
+
+    return maxAngle > halfFov;
+  };
+
+  let low = 2;
+  let high = 80;
+  for (let i = 0; i < 25; i += 1) {
+    const mid = (low + high) / 2;
+    if (exceedsFov(mid)) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+
+  return high * 1.05; // add a slight margin so the board comfortably fits
 };
 
 const getSquare = (row: number, col: number): Square => {
@@ -68,17 +113,30 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const controlsRef = useRef<OrbitControlsImpl>(null);
   const { camera } = useThree();
+  const boardViewDistance = useMemo(() => computeBoardViewDistance(camera.fov), [camera.fov]);
+
+  useEffect(() => {
+    const defaultPosition = CAMERA_DIRECTIONS.white.clone().multiplyScalar(boardViewDistance);
+    camera.position.copy(defaultPosition);
+    camera.lookAt(LOOK_AT_TARGET);
+    if (controlsRef.current) {
+      controlsRef.current.target.copy(LOOK_AT_TARGET);
+      controlsRef.current.minDistance = boardViewDistance * 0.7;
+      controlsRef.current.maxDistance = boardViewDistance * 2.5;
+      controlsRef.current.update();
+    }
+  }, [boardViewDistance, camera]);
 
   useEffect(() => {
     if (!playerColor || gameStatus !== "started") {
       return;
     }
 
-    const targetPosition =
-      playerColor === "black" ? new Vector3(0, 8, -8) : new Vector3(0, 8, 8);
+    const direction = playerColor === "black" ? CAMERA_DIRECTIONS.black : CAMERA_DIRECTIONS.white;
+    const targetPosition = direction.clone().multiplyScalar(boardViewDistance);
     const startPosition = camera.position.clone();
     const startTarget = controlsRef.current?.target.clone() ?? new Vector3(0, 0, 0);
-    const lookAtTarget = new Vector3(0, 0, 0);
+    const lookAtTarget = LOOK_AT_TARGET.clone();
     const duration = 800;
     let animationFrame = 0;
     const startTime = performance.now();
@@ -91,6 +149,8 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
 
       if (controlsRef.current) {
         controlsRef.current.target.lerpVectors(startTarget, lookAtTarget, progress);
+        controlsRef.current.minDistance = boardViewDistance * 0.7;
+        controlsRef.current.maxDistance = boardViewDistance * 2.5;
         controlsRef.current.update();
       }
 
@@ -102,7 +162,7 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
     animationFrame = requestAnimationFrame(animate);
 
     return () => cancelAnimationFrame(animationFrame);
-  }, [camera, gameStatus, playerColor]);
+  }, [boardViewDistance, camera, gameStatus, playerColor]);
 
   const validMoves = useMemo(() => {
     if (!selectedSquare) return [];
@@ -213,7 +273,12 @@ const ChessBoard: React.FC<ChessBoardProps> = ({
 
   return (
     <>
-      <OrbitControls ref={controlsRef} makeDefault minDistance={2} />
+      <OrbitControls
+        ref={controlsRef}
+        makeDefault
+        minDistance={boardViewDistance * 0.7}
+        maxDistance={boardViewDistance * 2.5}
+      />
       <Lights />
       <mesh receiveShadow position={[0, -0.16, 0]}>
         <boxGeometry args={[8.8, 0.3, 8.8]} />

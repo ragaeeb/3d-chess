@@ -71,8 +71,8 @@ export const handler = async (event: NetlifyEvent): Promise<NetlifyResponse> => 
       const assignment = await getAssignment(playerId);
       const game = await getGameRecord(suffix);
 
-      const isPlayer = Boolean(assignment && assignment.gameId === suffix);
-      const isSpectator = Boolean(game && game.spectators.includes(playerId));
+        const isPlayer = Boolean(assignment && assignment.gameId === suffix);
+        const isSpectator = Boolean(game?.spectators.includes(playerId));
 
       if (!isPlayer && !isSpectator) {
         return jsonResponse(403, { error: "Player is not part of this game" });

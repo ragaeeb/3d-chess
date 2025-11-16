@@ -48,6 +48,8 @@ const GamePage: React.FC = () => {
     const [bannerMessage, setBannerMessage] = useState<string | null>(null);
     const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
     const [showShareLink, setShowShareLink] = useState(false);
+    const [canPlayAsOpponent, setCanPlayAsOpponent] = useState(false);
+    const [isClaimingSeat, setIsClaimingSeat] = useState(false);
 
     const [pusherClient, setPusherClient] = useState<Pusher | null>(null);
     const gameChannelRef = useRef<Channel | null>(null);
@@ -74,6 +76,8 @@ const GamePage: React.FC = () => {
         setBoard(game.board());
         setLastMove(null);
         clearBanner();
+        setCanPlayAsOpponent(false);
+        setIsClaimingSeat(false);
     }, [game, clearBanner]);
 
     const updateBannerFromGame = useCallback(() => {
@@ -146,6 +150,8 @@ const GamePage: React.FC = () => {
         setRole(null);
         setMessage('Your opponent has left the game. Create a new match to keep playing.');
         setShowShareLink(false);
+        setCanPlayAsOpponent(false);
+        setIsClaimingSeat(false);
         resetBoard();
     }, [cleanupChannels, resetBoard]);
 
@@ -172,6 +178,8 @@ const GamePage: React.FC = () => {
             setGameStatus('not-started');
             setRole(null);
             setPlayerColor(null);
+            setCanPlayAsOpponent(false);
+            setIsClaimingSeat(false);
         },
         [cleanupChannels, game],
     );
@@ -230,6 +238,8 @@ const GamePage: React.FC = () => {
             setGameStatus('started');
             setMessage(null);
             setShowShareLink(false);
+            setCanPlayAsOpponent(false);
+            setIsClaimingSeat(false);
             clearBanner();
 
             try {
@@ -332,12 +342,23 @@ const GamePage: React.FC = () => {
 
                 if (result.role === 'spectator') {
                     setRole('spectator');
-                    setGameStatus('started');
-                    setMessage('You are spectating this game');
+                    const canClaim = Boolean(result.canPlayAsOpponent);
+                    setCanPlayAsOpponent(canClaim);
+                    if (canClaim && result.status === 'waiting') {
+                        setGameStatus('waiting-opponent');
+                        setMessage('Click "Play as Opponent" to join the match.');
+                    } else if (result.status === 'waiting') {
+                        setGameStatus('waiting-opponent');
+                        setMessage('Waiting for the host to start the match.');
+                    } else {
+                        setGameStatus('started');
+                        setMessage('You are spectating this game');
+                    }
                     setShowShareLink(false);
                 } else if (result.color) {
                     setPlayerColor(result.color);
                     setRole(result.color);
+                    setCanPlayAsOpponent(false);
 
                     if (result.status === 'waiting') {
                         setGameStatus('waiting-opponent');
@@ -386,6 +407,49 @@ const GamePage: React.FC = () => {
     }, [notifyLeave]);
 
     useEffect(() => () => cleanupChannels(), [cleanupChannels]);
+
+    const handleClaimOpponentSeat = useCallback(async () => {
+        if (!playerId || !gameId || isClaimingSeat) {
+            return;
+        }
+
+        setIsClaimingSeat(true);
+        try {
+            const response = await fetch('/.netlify/functions/move', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'claim', playerId, gameId }),
+            });
+
+            const result = await response.json().catch(() => ({ error: 'Unable to claim opponent seat' }));
+            if (!response.ok) {
+                setMessage(result.error ?? 'Unable to claim opponent seat');
+                return;
+            }
+
+            if (result.color === 'black') {
+                try {
+                    game.load(result.fen);
+                } catch (error) {
+                    console.error('Failed to sync game after claiming seat', error);
+                }
+                setBoard(game.board());
+                setPlayerColor('black');
+                setRole('black');
+                setGameStatus('started');
+                setMessage(null);
+                setLastMove(null);
+                setCanPlayAsOpponent(false);
+                setShowShareLink(false);
+                updateBannerFromGame();
+            }
+        } catch (error) {
+            console.error('Failed to claim opponent seat', error);
+            setMessage('Failed to join as opponent. Please try again.');
+        } finally {
+            setIsClaimingSeat(false);
+        }
+    }, [game, gameId, isClaimingSeat, playerId, updateBannerFromGame]);
 
     const handleLocalMove = useCallback(
         (move: { from: string; to: string }) => {
@@ -483,6 +547,9 @@ const GamePage: React.FC = () => {
                 playerColor={playerColor}
                 role={role}
                 turn={turn}
+                canPlayAsOpponent={canPlayAsOpponent}
+                onClaimSeat={canPlayAsOpponent ? handleClaimOpponentSeat : undefined}
+                isClaimingSeat={isClaimingSeat}
             />
 
             <Canvas

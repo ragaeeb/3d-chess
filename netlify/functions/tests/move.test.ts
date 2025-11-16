@@ -19,13 +19,19 @@ const createPusherMock = () => ({
     authorizeChannel: mock(() => ({ auth: 'ok' })),
 });
 
-const setupMatch = async (whiteId = 'white-player', blackId = 'black-player', autoJoinBlack = true) => {
+const setupMatch = async (whiteId = 'white-player', blackId = 'black-player', autoClaimBlack = true) => {
     const createResponse = await handler(jsonEvent({ action: 'create', playerId: whiteId }));
     const { gameId } = JSON.parse(createResponse.body);
 
-    if (autoJoinBlack) {
+    if (autoClaimBlack) {
         const joinResponse = await handler(jsonEvent({ action: 'join', playerId: blackId, gameId }));
         expect(joinResponse.statusCode).toBe(200);
+        const joinPayload = JSON.parse(joinResponse.body);
+        expect(joinPayload.role).toBe('spectator');
+        expect(joinPayload.canPlayAsOpponent).toBe(true);
+
+        const claimResponse = await handler(jsonEvent({ action: 'claim', playerId: blackId, gameId }));
+        expect(claimResponse.statusCode).toBe(200);
     }
 
     return { gameId, whiteId, blackId };
@@ -57,12 +63,19 @@ describe('move handler', () => {
         expect(body.status).toBe('waiting');
     });
 
-    it('should join existing game as black and notify white', async () => {
+    it('should require claiming the opponent seat before the match starts', async () => {
         const { gameId, whiteId } = await setupMatch('white-join', 'black-join', false);
         const joinResponse = await handler(jsonEvent({ action: 'join', playerId: 'black-join', gameId }));
         expect(joinResponse.statusCode).toBe(200);
 
-        const payload = JSON.parse(joinResponse.body);
+        const joinPayload = JSON.parse(joinResponse.body);
+        expect(joinPayload.role).toBe('spectator');
+        expect(joinPayload.canPlayAsOpponent).toBe(true);
+
+        const claimResponse = await handler(jsonEvent({ action: 'claim', playerId: 'black-join', gameId }));
+        expect(claimResponse.statusCode).toBe(200);
+
+        const payload = JSON.parse(claimResponse.body);
         expect(payload.color).toBe('black');
         expect(payload.status).toBe('active');
 

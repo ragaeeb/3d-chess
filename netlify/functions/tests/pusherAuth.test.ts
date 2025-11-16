@@ -17,7 +17,7 @@ let authorizeChannel: ReturnType<typeof mock<AuthorizeFn>>;
 describe('pusherAuth Netlify function', () => {
     beforeEach(() => {
         __resetMemoryStore();
-        authorizeChannel = mock<AuthorizeFn>((socketId: string, channel: string, data?: unknown) => ({ auth: 'ok', data }));
+        authorizeChannel = mock<AuthorizeFn>((_socketId: string, _channel: string, data?: unknown) => ({ auth: 'ok', data }));
         setServerPusher({ trigger: mock(async () => {}), authorizeChannel });
     });
 
