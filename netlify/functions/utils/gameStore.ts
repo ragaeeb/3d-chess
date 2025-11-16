@@ -62,19 +62,24 @@ const resolveMemoryStore = (): MemoryStore => {
 
 const memoryStore = resolveMemoryStore();
 
-const parseJSON = <T>(value: string | null): T | null => {
-    if (!value) {
-        return null;
-    }
-    try {
-        return JSON.parse(value) as T;
-    } catch (error) {
-        console.error('Failed to parse stored value', error);
-        return null;
-    }
-};
-
 const serialize = (value: unknown) => JSON.stringify(value);
+
+const parseStoredValue = <T>(value: unknown): T | null => {
+    if (value == null || value === '') {
+        return null;
+    }
+
+    if (typeof value === 'string') {
+        try {
+            return JSON.parse(value) as T;
+        } catch (error) {
+            console.error('Failed to parse stored value', error);
+            return null;
+        }
+    }
+
+    return value as T;
+};
 
 const EMPTY_VALUE = '';
 
@@ -149,8 +154,8 @@ export const getAssignment = async (playerId: string): Promise<PlayerAssignment 
     if (!redis) {
         return memoryStore.assignments.get(playerId) ?? null;
     }
-    const value = await redis.get<string>(assignmentKey(playerId));
-    return parseJSON<PlayerAssignment>(value);
+    const value = await redis.get<PlayerAssignment | string>(assignmentKey(playerId));
+    return parseStoredValue<PlayerAssignment>(value);
 };
 
 export const setAssignment = async (playerId: string, assignment: PlayerAssignment) => {
@@ -176,8 +181,8 @@ export const getGameRecord = async (gameId: string): Promise<GameRecord | null> 
         return memoryStore.games.get(gameId) ?? null;
     }
 
-    const value = await redis.get<string>(gameKey(gameId));
-    return parseJSON<GameRecord>(value);
+    const value = await redis.get<GameRecord | string>(gameKey(gameId));
+    return parseStoredValue<GameRecord>(value);
 };
 
 export const saveGameRecord = async (record: GameRecord) => {
