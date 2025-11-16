@@ -4,24 +4,26 @@
 [![codecov](https://codecov.io/gh/ragaeeb/3d-chess/graph/badge.svg?token=5DKNZ728JV)](https://codecov.io/gh/ragaeeb/3d-chess)
 [![Netlify Status](https://api.netlify.com/api/v1/badges/3ce1cbce-bc5f-4f5b-b0af-4b24bb30b4de/deploy-status)](https://app.netlify.com/projects/chessie/deploys)
 
-An immersive multiplayer 3D chess experience built with Next.js 16 and Bun. The project combines the frontend and backend into a single Next.js application that streams real-time updates through Server-Sent Events (SSE).
+An immersive multiplayer 3D chess experience built with Next.js 16 and Bun. The project now relies on serverless Netlify Functions powered by Pusher Channels for real-time multiplayer rather than a traditional long-running server.
 
 ## Tech Stack
 
-- **Next.js 16** (App Router) for pages and API routes.
+- **Next.js 16** (App Router) for pages and UI composition.
 - **React 19** for UI composition.
 - **Three.js** and **@react-three/fiber** for the interactive 3D board.
+- **Pusher Channels** for realtime move broadcasting across serverless functions.
+- **Netlify Functions** for server-side move validation and matchmaking.
 - **Tailwind CSS 4** for utility-first styling.
 - **Bun** for dependency management and scripts.
 - **Biome** for linting and formatting.
-- **Bun test** and **chess.js** powering the multiplayer engine and unit tests.
+- **chess.js** powering chess move validation on both client and server.
 
 ## Repository Structure
 
-- `app/` – Next.js routes, including SSE endpoints under `app/api/game/*`.
+- `app/` – Next.js routes and client-side UI.
 - `src/` – Shared React components, utilities, and types.
+- `netlify/functions/` – Serverless functions for Pusher authentication and move validation.
 - `public/` – Static assets served by Next.js.
-- `tests/` – Bun-based unit tests for API routes and the game manager.
 - `tailwind.config.ts` – Tailwind CSS configuration targeting v4.
 - `postcss.config.js` – PostCSS pipeline using `@tailwindcss/postcss`.
 - `frontend/` & `server/` – Legacy packages retained only for their lockfiles' node_modules caches; they are not part of the active application.
@@ -34,18 +36,48 @@ An immersive multiplayer 3D chess experience built with Next.js 16 and Bun. The 
    bun install
    ```
 
-2. Run the development server:
+2. Copy `.env.example` to `.env.local` (see the environment variables section below) and fill in your Pusher credentials.
+
+3. Run the standard Next.js development server:
 
    ```bash
    bun run dev
    ```
 
-3. Open [http://localhost:3000](http://localhost:3000) to view the app. Navigate to `/game` to join a multiplayer match.
+   The app now exposes the Netlify handlers under `/.netlify/functions/*` even in `next dev`, so realtime matchmaking and moves work at [http://localhost:3000](http://localhost:3000).
+
+4. (Optional) Start the Netlify dev server for a full parity test, including Netlify's local Functions emulator:
+
+   ```bash
+   netlify dev
+   ```
+
+   This command proxies the same `/.netlify/functions/*` endpoints through Netlify's simulator and serves the app on port `8888`.
+
+5. Open `/game` in two browser windows to verify realtime play locally.
+
+## Environment Variables
+
+Create a `.env.local` file (or configure environment variables in Netlify) with the following keys:
+
+| Variable | Description |
+| --- | --- |
+| `PUSHER_APP_ID` | Pusher Channels App ID used by Netlify Functions. |
+| `PUSHER_KEY` | Pusher Channels key used by Netlify Functions. |
+| `PUSHER_SECRET` | Pusher Channels secret used by Netlify Functions. |
+| `PUSHER_CLUSTER` | Cluster slug for the Pusher app (e.g. `mt1`). |
+| `NEXT_PUBLIC_PUSHER_KEY` | The same key exposed to the browser to create the Pusher client. |
+| `NEXT_PUBLIC_PUSHER_CLUSTER` | Cluster slug mirrored to the browser environment (must match `PUSHER_CLUSTER`). |
+| `APP_ALLOWED_ORIGIN` | Optional origin (e.g. `https://your-site.netlify.app`) used to scope CORS responses for Netlify Functions. |
+| `UPSTASH_REDIS_REST_URL` | Upstash Redis REST URL for persisting matchmaking/game state across Netlify Functions. |
+| `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis REST token paired with the URL above. |
+
+For local development you can omit the Upstash credentials—the in-memory store will be used automatically. Netlify deployments **must** provide the Upstash variables so that separate serverless functions share canonical state. `APP_ALLOWED_ORIGIN` defaults to `*`, but setting it to your deployed origin locks the Netlify Functions to requests from your UI.
 
 ## Quality Checks
 
 - `bun run lint` – run Biome static analysis and formatting checks.
-- `bun test` – execute unit tests for the GameManager and API routes.
+- `bun test` – execute the Netlify function, route bridge, and Pusher client unit tests.
 - `bun run build` – create a production build using the Next.js compiler.
 
 ## Coding Conventions
@@ -58,7 +90,7 @@ An immersive multiplayer 3D chess experience built with Next.js 16 and Bun. The 
 
 ## Multiplayer Flow
 
-Players join a queue through `POST /api/game/join`. Once paired, the shared `GameManager` coordinates turns and emits updates through SSE streams opened at `GET /api/game/stream`. Client components consume these events to render the board, animate moves, and surface match status updates.
+Players join a queue by calling the Netlify `/.netlify/functions/move` endpoint with `action: "queue"`. The function performs lightweight matchmaking, initialises a canonical chess.js state, and broadcasts the pairing through a private Pusher channel. Clients submit moves with `action: "move"`, the server validates them against the canonical board, and publishes updates to the corresponding `private-game-{id}` channel. Presence channels (`presence-game-{id}`) keep track of online players so the UI can surface disconnects immediately—no polling required.
 
 # Acknowledgements
 
