@@ -1,5 +1,6 @@
 'use client';
 
+import { useParams } from 'next/navigation';
 import { Canvas } from '@react-three/fiber';
 import { Chess, type Square } from 'chess.js';
 import type Pusher from 'pusher-js';
@@ -8,8 +9,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import ChessBoard from '@/components/3d/chessBoard';
 import GameStatusPanel from '@/components/GameStatusPanel';
+import ShareGameLink from '@/components/ShareGameLink';
+import { ensurePlayerId } from '@/lib/playerIdentity';
 import { createPusherClient } from '@/lib/pusherClient';
-import type { ChessMove, GameStatus } from '@/types/game';
+import type { ChessMove, GameStatus, PlayerRole } from '@/types/game';
 import { GAME_OVER, INIT_GAME, MOVE, OPPONENT_LEFT } from '@/types/socket';
 
 type GameStartPayload = {
@@ -32,24 +35,31 @@ type GameOverPayload = { winner?: 'white' | 'black' | null; reason?: string; fen
 type ConnectionState = 'connected' | 'connecting' | 'disconnected';
 
 const GamePage: React.FC = () => {
-    const [playerId] = useState(() => crypto.randomUUID());
+    const params = useParams();
+    const gameId = params.gameId as string;
+    const [playerId, setPlayerId] = useState<string | null>(null);
     const [game] = useState(() => new Chess());
     const [board, setBoard] = useState(() => game.board());
     const [lastMove, setLastMove] = useState<ChessMove | null>(null);
     const [gameStatus, setGameStatus] = useState<GameStatus>('not-started');
     const [playerColor, setPlayerColor] = useState<'white' | 'black' | null>(null);
+    const [role, setRole] = useState<PlayerRole | null>(null);
     const [message, setMessage] = useState<string | null>(null);
     const [bannerMessage, setBannerMessage] = useState<string | null>(null);
     const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
-    const [gameId, setGameId] = useState<string | null>(null);
+    const [showShareLink, setShowShareLink] = useState(false);
 
     const [pusherClient, setPusherClient] = useState<Pusher | null>(null);
     const gameChannelRef = useRef<Channel | null>(null);
     const presenceChannelRef = useRef<PresenceChannel | null>(null);
     const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const waitingRef = useRef(false);
 
     const isConnected = connectionState === 'connected';
+    const isSpectator = role === 'spectator';
+
+    useEffect(() => {
+        setPlayerId(ensurePlayerId());
+    }, []);
 
     const clearBanner = useCallback(() => {
         if (bannerTimeoutRef.current) {
@@ -104,11 +114,11 @@ const GamePage: React.FC = () => {
     }, [pusherClient]);
 
     const notifyLeave = useCallback(() => {
-        if (!waitingRef.current && !gameId) {
+        if (!gameId || !playerId) {
             return;
         }
 
-        const payload = JSON.stringify({ action: 'leave', playerId });
+        const payload = JSON.stringify({ action: 'leave', playerId, gameId });
 
         if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
             try {
@@ -127,25 +137,21 @@ const GamePage: React.FC = () => {
                 console.error('Failed to notify leave', error);
             });
         }
-
-        waitingRef.current = false;
     }, [gameId, playerId]);
 
     const handleOpponentLeft = useCallback(() => {
         cleanupChannels();
         setGameStatus('not-started');
         setPlayerColor(null);
-        setMessage('Your opponent has left the game. Queue again to find a new match.');
-        waitingRef.current = false;
-        setGameId(null);
+        setRole(null);
+        setMessage('Your opponent has left the game. Create a new match to keep playing.');
+        setShowShareLink(false);
         resetBoard();
     }, [cleanupChannels, resetBoard]);
 
     const handleGameOver = useCallback(
         (payload: GameOverPayload) => {
             cleanupChannels();
-            waitingRef.current = false;
-            setGameId(null);
 
             if (payload.fen) {
                 try {
@@ -164,6 +170,7 @@ const GamePage: React.FC = () => {
             }
 
             setGameStatus('not-started');
+            setRole(null);
             setPlayerColor(null);
         },
         [cleanupChannels, game],
@@ -213,12 +220,16 @@ const GamePage: React.FC = () => {
 
     const startMatch = useCallback(
         (payload: GameStartPayload) => {
-            const { gameId: nextGameId, color, fen } = payload;
-            waitingRef.current = false;
-            setGameId(nextGameId);
+            if (payload.gameId !== gameId) {
+                return;
+            }
+
+            const { color, fen } = payload;
+            setRole(color);
             setPlayerColor(color);
             setGameStatus('started');
             setMessage(null);
+            setShowShareLink(false);
             clearBanner();
 
             try {
@@ -230,13 +241,17 @@ const GamePage: React.FC = () => {
             }
             setLastMove(null);
             if (pusherClient) {
-                subscribeToGameChannels(pusherClient, nextGameId);
+                subscribeToGameChannels(pusherClient, payload.gameId);
             }
         },
-        [clearBanner, game, pusherClient, resetBoard, subscribeToGameChannels],
+        [clearBanner, game, gameId, pusherClient, resetBoard, subscribeToGameChannels],
     );
 
     useEffect(() => {
+        if (!playerId) {
+            return;
+        }
+
         let client: Pusher | null = null;
 
         try {
@@ -265,7 +280,7 @@ const GamePage: React.FC = () => {
     }, [playerId]);
 
     useEffect(() => {
-        if (!pusherClient) {
+        if (!pusherClient || !playerId) {
             return;
         }
 
@@ -288,6 +303,77 @@ const GamePage: React.FC = () => {
     }, [playerId, pusherClient, startMatch]);
 
     useEffect(() => {
+        if (!gameId || !pusherClient || !playerId) {
+            return;
+        }
+
+        let cancelled = false;
+
+        const joinGame = async () => {
+            try {
+                const response = await fetch('/.netlify/functions/move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'join', playerId, gameId }),
+                });
+
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({ error: 'Failed to join game' }));
+                    if (!cancelled) {
+                        setMessage(error.error ?? 'Game not found');
+                    }
+                    return;
+                }
+
+                const result = await response.json();
+                if (cancelled) {
+                    return;
+                }
+
+                if (result.role === 'spectator') {
+                    setRole('spectator');
+                    setGameStatus('started');
+                    setMessage('You are spectating this game');
+                    setShowShareLink(false);
+                } else if (result.color) {
+                    setPlayerColor(result.color);
+                    setRole(result.color);
+
+                    if (result.status === 'waiting') {
+                        setGameStatus('waiting-opponent');
+                        setMessage('Waiting for opponent to join...');
+                        setShowShareLink(true);
+                    } else if (result.status === 'active') {
+                        setGameStatus('started');
+                        setMessage(null);
+                        setShowShareLink(false);
+                    }
+                }
+
+                try {
+                    game.load(result.fen);
+                    setBoard(game.board());
+                } catch (error) {
+                    console.error('Failed to load game state', error);
+                }
+
+                subscribeToGameChannels(pusherClient, gameId);
+            } catch (error) {
+                console.error('Failed to join game', error);
+                if (!cancelled) {
+                    setMessage('Failed to join game. Please try again.');
+                }
+            }
+        };
+
+        joinGame();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [game, gameId, playerId, pusherClient, subscribeToGameChannels]);
+
+    useEffect(() => {
         const handleBeforeUnload = () => {
             notifyLeave();
         };
@@ -299,53 +385,16 @@ const GamePage: React.FC = () => {
         };
     }, [notifyLeave]);
 
-    const handleStartGame = useCallback(async () => {
-        if (!pusherClient || !isConnected) {
-            setMessage('Unable to start game while disconnected.');
-            return;
-        }
-
-        waitingRef.current = true;
-        cleanupChannels();
-        resetBoard();
-        setPlayerColor(null);
-        setGameStatus('waiting-opponent');
-        setMessage('Waiting for an opponent...');
-
-        try {
-            const response = await fetch('/.netlify/functions/move', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'queue', playerId }),
-            });
-
-            const result = await response.json().catch(() => ({ error: 'Failed to join queue' }));
-
-            if (!response.ok) {
-                waitingRef.current = false;
-                setMessage(result.error ?? 'Failed to join queue');
-                setGameStatus('not-started');
-                return;
-            }
-
-            if (result.status === 'waiting') {
-                return;
-            }
-
-            if (result.status === 'matched' || result.status === 'already-playing') {
-                startMatch(result as GameStartPayload);
-            }
-        } catch (error) {
-            waitingRef.current = false;
-            console.error('Failed to join match queue', error);
-            setMessage('Unable to join the queue. Please try again.');
-            setGameStatus('not-started');
-        }
-    }, [cleanupChannels, isConnected, playerId, pusherClient, resetBoard, startMatch]);
+    useEffect(() => () => cleanupChannels(), [cleanupChannels]);
 
     const handleLocalMove = useCallback(
         (move: { from: string; to: string }) => {
-            if (gameStatus !== 'started' || !playerColor || !gameId) {
+            if (isSpectator) {
+                setMessage('You are spectating this game');
+                return;
+            }
+
+            if (gameStatus !== 'started' || !playerColor || !playerId) {
                 return;
             }
 
@@ -402,7 +451,7 @@ const GamePage: React.FC = () => {
                     updateBannerFromGame();
                 });
         },
-        [game, gameId, gameStatus, playerColor, playerId, updateBannerFromGame],
+        [game, gameStatus, isSpectator, playerColor, playerId, updateBannerFromGame],
     );
 
     const getLegalMoves = useCallback(
@@ -423,12 +472,16 @@ const GamePage: React.FC = () => {
                 </div>
             )}
 
+            {showShareLink && gameStatus === 'waiting-opponent' && (
+                <ShareGameLink gameId={gameId} onClose={() => setShowShareLink(false)} />
+            )}
+
             <GameStatusPanel
                 isConnected={isConnected}
                 message={message}
                 gameStatus={gameStatus}
                 playerColor={playerColor}
-                handleStartGame={handleStartGame}
+                role={role}
                 turn={turn}
             />
 
@@ -445,6 +498,7 @@ const GamePage: React.FC = () => {
                     gameStatus={gameStatus}
                     playerColor={playerColor}
                     lastMove={lastMove}
+                    isSpectator={isSpectator}
                 />
             </Canvas>
         </div>

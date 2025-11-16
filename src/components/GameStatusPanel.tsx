@@ -2,14 +2,14 @@
 
 import { AnimatePresence, motion } from 'framer-motion';
 import { useState } from 'react';
-import type { GameStatus } from '@/types/game';
+import type { GameStatus, PlayerRole } from '@/types/game';
 
 type GameStatusPanelProps = {
     isConnected: boolean;
     message: string | null;
     gameStatus: GameStatus;
     playerColor: string | null;
-    handleStartGame: () => void;
+    role: PlayerRole | null;
     turn: string;
 };
 
@@ -18,7 +18,7 @@ const GameStatusPanel: React.FC<GameStatusPanelProps> = ({
     message,
     gameStatus,
     playerColor,
-    handleStartGame,
+    role,
     turn,
 }) => {
     const [open, setOpen] = useState(true);
@@ -40,7 +40,9 @@ const GameStatusPanel: React.FC<GameStatusPanelProps> = ({
                 >
                     <div className="flex items-center justify-between gap-3">
                         <div className="pr-4 font-medium text-sm text-white/80">
-                            {gameStatus === 'started' ? (
+                            {role === 'spectator' ? (
+                                'Spectating'
+                            ) : gameStatus === 'started' ? (
                                 <span>{turn === playerColor?.[0] ? 'Your Turn' : "Opponent's Turn"}</span>
                             ) : gameStatus === 'waiting-opponent' ? (
                                 'Waiting for opponent'
@@ -90,6 +92,24 @@ const GameStatusPanel: React.FC<GameStatusPanelProps> = ({
                                 </div>
                             )}
                             <div className="mb-8">
+                                {role === 'spectator' && (
+                                    <div className="space-y-4 text-center">
+                                        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-r from-blue-400 to-purple-400">
+                                            <svg className="h-8 w-8 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                                <title>Spectating</title>
+                                                <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+                                                <path
+                                                    fillRule="evenodd"
+                                                    d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z"
+                                                    clipRule="evenodd"
+                                                />
+                                            </svg>
+                                        </div>
+                                        <h2 className="font-semibold text-white/90 text-xl">Spectator Mode</h2>
+                                        <p className="text-white/60">Watching the game in progress</p>
+                                    </div>
+                                )}
+
                                 {gameStatus === 'not-started' && (
                                     <div className="space-y-4 text-center">
                                         <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-b from-[#FFFFF0] to-[#5d9948]">
@@ -165,20 +185,6 @@ const GameStatusPanel: React.FC<GameStatusPanelProps> = ({
                                         </div>
                                     </div>
                                 )}
-                            </div>
-                            <div className="space-y-3">
-                                <button
-                                    type="button"
-                                    onClick={handleStartGame}
-                                    disabled={!isConnected || gameStatus !== 'not-started'}
-                                    className={`w-full transform rounded-xl px-6 py-4 font-bold text-white/90 transition-all duration-300 ${
-                                        !isConnected || gameStatus !== 'not-started'
-                                            ? 'cursor-not-allowed bg-gray-600/50 opacity-50'
-                                            : 'bg-gradient-to-b from-[#d3d3ad] to-[#315a22] hover:scale-105 hover:from-[#FFFFF0] hover:to-[#5d9948] hover:shadow-[#5d9948]/25 hover:shadow-xl active:scale-95'
-                                    }`}
-                                >
-                                    {gameStatus === 'not-started' ? 'Start Game' : 'Game in Progress'}
-                                </button>
                             </div>
                         </motion.div>
                     )}

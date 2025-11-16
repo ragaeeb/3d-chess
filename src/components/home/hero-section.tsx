@@ -21,7 +21,7 @@ const HeroSection = () => {
             <div className="flex gap-4">
                 <button
                     type="button"
-                    onClick={() => router.push('/game')}
+                    onClick={() => router.push('/game/new')}
                     className="group relative inline-flex h-12 cursor-pointer items-center justify-center overflow-hidden rounded-md border border-green-200 bg-[#5d9948] px-6 font-medium text-white transition-all duration-100 [box-shadow:5px_5px_rgb(82_82_82)] active:translate-x-[3px] active:translate-y-[3px] active:[box-shadow:0px_0px_rgb(82_82_82)]"
                 >
                     Play Chess

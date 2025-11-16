@@ -53,7 +53,15 @@ const PieceComponent = ({ piece, highlight }: { piece: Piece; highlight: boolean
   </group>
 );
 
-const ChessBoard: React.FC<ChessBoardProps> = ({ board, onMove, getLegalMoves, gameStatus, playerColor, lastMove }) => {
+const ChessBoard: React.FC<ChessBoardProps> = ({
+  board,
+  onMove,
+  getLegalMoves,
+  gameStatus,
+  playerColor,
+  lastMove,
+  isSpectator = false,
+}) => {
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
 
   const validMoves = useMemo(() => {
@@ -78,6 +86,10 @@ const ChessBoard: React.FC<ChessBoardProps> = ({ board, onMove, getLegalMoves, g
 
   const handleSquareClick = useCallback(
     (row: number, col: number) => {
+      if (isSpectator) {
+        return;
+      }
+
       if (gameStatus === "waiting-opponent") {
         alert("Game has not started yet.");
         return;
@@ -105,7 +117,7 @@ const ChessBoard: React.FC<ChessBoardProps> = ({ board, onMove, getLegalMoves, g
       onMove(move);
       setSelectedSquare(null);
     },
-    [selectedSquare, board, onMove, gameStatus, playerColor],
+    [selectedSquare, board, onMove, gameStatus, playerColor, isSpectator],
   );
 
   const boardElements = useMemo(() => {
