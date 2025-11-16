@@ -1,8 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Chess } from 'chess.js';
-import Pusher from 'pusher';
-
-import { GAME_OVER, MOVE, OPPONENT_LEFT } from '../../src/types/socket';
+import { GAME_OVER, INIT_GAME, MOVE, OPPONENT_LEFT } from '../../src/types/socket';
 import {
     claimWaitingPlayer,
     clearWaitingPlayer,
@@ -16,32 +14,9 @@ import {
     updateGameFen,
 } from './utils/gameStore';
 import type { PlayerColor, GameRecord } from './utils/gameStore';
-
-const required = (name: string) => {
-    const value = process.env[name];
-    if (!value) {
-        throw new Error(`Missing environment variable: ${name}`);
-    }
-    return value;
-};
-
-const pusher = new Pusher({
-    appId: required('PUSHER_APP_ID'),
-    key: required('PUSHER_KEY'),
-    secret: required('PUSHER_SECRET'),
-    cluster: required('PUSHER_CLUSTER'),
-    useTLS: true,
-});
-
-const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-};
-
-type NetlifyEvent = { httpMethod: string; body: string | null; headers: Record<string, string | undefined> };
-
-type NetlifyResponse = { statusCode: number; headers?: Record<string, string>; body: string };
+import type { NetlifyEvent, NetlifyResponse } from './utils/http';
+import { jsonResponse, textResponse } from './utils/http';
+import { getServerPusher } from './utils/pusher';
 
 type QueueActionResponse =
     | { status: 'waiting' }
@@ -51,11 +26,7 @@ type MoveAction = { from: string; to: string; promotion?: string };
 
 type RequestBody = { action?: 'queue' | 'move' | 'leave'; playerId?: string; move?: MoveAction };
 
-const respond = (statusCode: number, data: unknown): NetlifyResponse => ({
-    statusCode,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-});
+const respond = (statusCode: number, data: unknown): NetlifyResponse => jsonResponse(statusCode, data);
 
 const getOpponentId = (game: GameRecord, color: PlayerColor) =>
     color === 'white' ? game.players.black : game.players.white;
@@ -64,7 +35,7 @@ const triggerGameStart = async (
     playerId: string,
     payload: QueueActionResponse & { status: 'matched' | 'already-playing' },
 ) => {
-    await pusher.trigger(`private-player-${playerId}`, 'game-start', payload);
+    await getServerPusher().trigger(`private-player-${playerId}`, INIT_GAME, payload);
 };
 
 const handleQueue = async (playerId: string): Promise<NetlifyResponse> => {
@@ -162,7 +133,7 @@ const handleMove = async (playerId: string, move: MoveAction): Promise<NetlifyRe
     };
 
     try {
-        await pusher.trigger(`private-game-${game.id}`, MOVE, payload);
+        await getServerPusher().trigger(`private-game-${game.id}`, MOVE, payload);
     } catch (error) {
         console.error('Failed to broadcast move', error);
         return respond(500, { error: 'Failed to broadcast move' });
@@ -187,7 +158,7 @@ const handleMove = async (playerId: string, move: MoveAction): Promise<NetlifyRe
             await saveGameRecord(game);
         }
         try {
-            await pusher.trigger(`private-game-${game.id}`, GAME_OVER, { winner, reason, fen: updatedFen });
+            await getServerPusher().trigger(`private-game-${game.id}`, GAME_OVER, { winner, reason, fen: updatedFen });
         } catch (error) {
             console.error('Failed to broadcast game over', error);
         }
@@ -209,7 +180,7 @@ const handleLeave = async (playerId: string): Promise<NetlifyResponse> => {
     if (game) {
         const opponentId = getOpponentId(game, assignment.color);
         try {
-            await pusher.trigger(`private-game-${game.id}`, OPPONENT_LEFT, { playerId, opponentId });
+            await getServerPusher().trigger(`private-game-${game.id}`, OPPONENT_LEFT, { playerId, opponentId });
         } catch (error) {
             console.error('Failed to notify opponent about disconnect', error);
         }
@@ -221,7 +192,7 @@ const handleLeave = async (playerId: string): Promise<NetlifyResponse> => {
 
 export const handler = async (event: NetlifyEvent): Promise<NetlifyResponse> => {
     if (event.httpMethod === 'OPTIONS') {
-        return { statusCode: 200, headers: corsHeaders, body: 'OK' };
+        return textResponse(200, 'OK');
     }
 
     if (event.httpMethod !== 'POST') {

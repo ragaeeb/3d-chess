@@ -1,39 +1,7 @@
-import Pusher from "pusher";
-import { getAssignment } from "./utils/gameStore";
-
-const required = (name: string) => {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing environment variable: ${name}`);
-  }
-  return value;
-};
-
-const pusher = new Pusher({
-  appId: required("PUSHER_APP_ID"),
-  key: required("PUSHER_KEY"),
-  secret: required("PUSHER_SECRET"),
-  cluster: required("PUSHER_CLUSTER"),
-  useTLS: true,
-});
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
-
-type NetlifyEvent = {
-  httpMethod: string;
-  body: string | null;
-  headers: Record<string, string | undefined>;
-};
-
-type NetlifyResponse = {
-  statusCode: number;
-  headers?: Record<string, string>;
-  body: string;
-};
+import { getAssignment } from './utils/gameStore';
+import type { NetlifyEvent, NetlifyResponse } from './utils/http';
+import { getCorsHeaders, jsonResponse, textResponse } from './utils/http';
+import { getServerPusher } from './utils/pusher';
 
 const parseBody = (body: string | null, contentType?: string) => {
   if (!body) {
@@ -62,19 +30,11 @@ const channelSuffix = (channelName: string, prefix: string) =>
 
 export const handler = async (event: NetlifyEvent): Promise<NetlifyResponse> => {
   if (event.httpMethod === "OPTIONS") {
-    return {
-      statusCode: 200,
-      headers: corsHeaders,
-      body: "OK",
-    };
+    return textResponse(200, "OK");
   }
 
   if (event.httpMethod !== "POST") {
-    return {
-      statusCode: 405,
-      headers: corsHeaders,
-      body: JSON.stringify({ error: "Method not allowed" }),
-    };
+    return jsonResponse(405, { error: "Method not allowed" });
   }
 
   const payload = parseBody(event.body, event.headers["content-type"] ?? event.headers["Content-Type"]);
@@ -83,22 +43,16 @@ export const handler = async (event: NetlifyEvent): Promise<NetlifyResponse> => 
   const playerId = payload.playerId ?? payload.player_id;
 
   if (!socketId || !channelName || !playerId) {
-    return {
-      statusCode: 400,
-      headers: corsHeaders,
-      body: JSON.stringify({ error: "Missing authentication parameters" }),
-    };
+    return jsonResponse(400, { error: "Missing authentication parameters" });
   }
 
   try {
+    const corsHeaders = getCorsHeaders();
+    const pusher = getServerPusher();
     if (channelName.startsWith("private-player-")) {
       const requestedPlayer = channelSuffix(channelName, "private-player-");
       if (requestedPlayer !== playerId) {
-        return {
-          statusCode: 403,
-          headers: corsHeaders,
-          body: JSON.stringify({ error: "Cannot subscribe to another player's channel" }),
-        };
+        return jsonResponse(403, { error: "Cannot subscribe to another player's channel" });
       }
 
       const auth = pusher.authorizeChannel(socketId, channelName);
@@ -117,11 +71,7 @@ export const handler = async (event: NetlifyEvent): Promise<NetlifyResponse> => 
       const assignment = await getAssignment(playerId);
 
       if (!assignment || assignment.gameId !== suffix) {
-        return {
-          statusCode: 403,
-          headers: corsHeaders,
-          body: JSON.stringify({ error: "Player is not part of this game" }),
-        };
+        return jsonResponse(403, { error: "Player is not part of this game" });
       }
 
       if (channelName.startsWith("presence-game-")) {
@@ -150,17 +100,9 @@ export const handler = async (event: NetlifyEvent): Promise<NetlifyResponse> => 
       };
     }
 
-    return {
-      statusCode: 403,
-      headers: corsHeaders,
-      body: JSON.stringify({ error: "Unknown channel" }),
-    };
+    return jsonResponse(403, { error: "Unknown channel" });
   } catch (error) {
     console.error("Failed to authorize Pusher channel", error);
-    return {
-      statusCode: 500,
-      headers: corsHeaders,
-      body: JSON.stringify({ error: "Failed to authorize" }),
-    };
+    return jsonResponse(500, { error: "Failed to authorize" });
   }
 };

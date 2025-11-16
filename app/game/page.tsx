@@ -295,16 +295,9 @@ const GamePage: React.FC = () => {
         window.addEventListener('beforeunload', handleBeforeUnload);
         return () => {
             window.removeEventListener('beforeunload', handleBeforeUnload);
-            handleBeforeUnload();
+            notifyLeave();
         };
     }, [notifyLeave]);
-
-    useEffect(
-        () => () => {
-            notifyLeave();
-        },
-        [notifyLeave],
-    );
 
     const handleStartGame = useCallback(async () => {
         if (!pusherClient || !isConnected) {
@@ -387,7 +380,7 @@ const GamePage: React.FC = () => {
             fetch('/.netlify/functions/move', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'move', playerId, move, gameId }),
+                body: JSON.stringify({ action: 'move', playerId, move }),
             })
                 .then(async (response) => {
                     if (response.ok) {

@@ -68,14 +68,16 @@ Create a `.env.local` file (or configure environment variables in Netlify) with 
 | `PUSHER_CLUSTER` | Cluster slug for the Pusher app (e.g. `mt1`). |
 | `NEXT_PUBLIC_PUSHER_KEY` | The same key exposed to the browser to create the Pusher client. |
 | `NEXT_PUBLIC_PUSHER_CLUSTER` | Cluster slug mirrored to the browser environment (must match `PUSHER_CLUSTER`). |
+| `APP_ALLOWED_ORIGIN` | Optional origin (e.g. `https://your-site.netlify.app`) used to scope CORS responses for Netlify Functions. |
 | `UPSTASH_REDIS_REST_URL` | Upstash Redis REST URL for persisting matchmaking/game state across Netlify Functions. |
 | `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis REST token paired with the URL above. |
 
-For local development you can omit the Upstash credentials—the in-memory store will be used automatically. Netlify deployments **must** provide the Upstash variables so that separate serverless functions share canonical state.
+For local development you can omit the Upstash credentials—the in-memory store will be used automatically. Netlify deployments **must** provide the Upstash variables so that separate serverless functions share canonical state. `APP_ALLOWED_ORIGIN` defaults to `*`, but setting it to your deployed origin locks the Netlify Functions to requests from your UI.
 
 ## Quality Checks
 
 - `bun run lint` – run Biome static analysis and formatting checks.
+- `bun test` – execute the Netlify function, route bridge, and Pusher client unit tests.
 - `bun run build` – create a production build using the Next.js compiler.
 
 ## Coding Conventions

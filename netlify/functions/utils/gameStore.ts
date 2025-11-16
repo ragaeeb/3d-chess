@@ -21,10 +21,13 @@ const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
 const redis = redisUrl && redisToken ? new Redis({ url: redisUrl, token: redisToken }) : null;
 
 const WAITING_KEY = 'chessie:waiting-player';
-const assignmentKey = (playerId: string) => `chessie:assignment:${playerId}`;
+const ASSIGNMENT_PREFIX = 'chessie:assignment:';
+const assignmentKey = (playerId: string) => `${ASSIGNMENT_PREFIX}${playerId}`;
 const gameKey = (gameId: string) => `chessie:game:${gameId}`;
 
 const GAME_TTL_SECONDS = 60 * 60 * 24; // 24h safeguard
+const STALE_MEMORY_WINDOW_MS = GAME_TTL_SECONDS * 1000;
+const MEMORY_CLEANUP_INTERVAL_MS = 60 * 1000;
 
 type MemoryStore = {
     waitingPlayer: string | null;
@@ -61,6 +64,23 @@ const resolveMemoryStore = (): MemoryStore => {
 };
 
 const memoryStore = resolveMemoryStore();
+let lastMemoryCleanup = 0;
+
+const cleanupMemoryStore = () => {
+    const now = Date.now();
+    if (now - lastMemoryCleanup < MEMORY_CLEANUP_INTERVAL_MS) {
+        return;
+    }
+    lastMemoryCleanup = now;
+
+    for (const [gameId, record] of memoryStore.games.entries()) {
+        if (now - record.lastUpdated > STALE_MEMORY_WINDOW_MS) {
+            memoryStore.games.delete(gameId);
+            memoryStore.assignments.delete(record.players.white);
+            memoryStore.assignments.delete(record.players.black);
+        }
+    }
+};
 
 const serialize = (value: unknown) => JSON.stringify(value);
 
@@ -89,6 +109,7 @@ if (not current) or current == '' then
   redis.call('SET', KEYS[1], ARGV[1])
   return ''
 end
+-- When the same player re-queues we keep them in place and return an empty string for idempotency.
 if current == ARGV[1] then
   return ''
 end
@@ -103,98 +124,186 @@ end
 return 1
 `;
 
-const useRedisStore = Boolean(redis);
+const UPDATE_FEN_LUA = `
+local record = redis.call('GET', KEYS[1])
+if not record then
+  return 0
+end
+local decoded = cjson.decode(record)
+decoded.fen = ARGV[1]
+decoded.lastUpdated = tonumber(ARGV[2])
+redis.call('SET', KEYS[1], cjson.encode(decoded), 'EX', ARGV[3])
+return 1
+`;
 
-export const isRedisBacked = useRedisStore;
+const ENSURE_GAME_LUA = `
+local existing = redis.call('GET', KEYS[1])
+if existing then
+  return existing
+end
+redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+return ARGV[1]
+`;
+
+const REMOVE_GAME_LUA = `
+local record = redis.call('GET', KEYS[1])
+if not record then
+  return nil
+end
+redis.call('DEL', KEYS[1])
+local decoded = cjson.decode(record)
+if decoded and decoded.players then
+  if decoded.players.white then
+    redis.call('DEL', ARGV[1] .. decoded.players.white)
+  end
+  if decoded.players.black then
+    redis.call('DEL', ARGV[1] .. decoded.players.black)
+  end
+end
+return record
+`;
+
+const handleRedisError = (context: string, error: unknown) => {
+    console.error(`Redis operation failed (${context})`, error);
+};
+
+export const isRedisBacked = Boolean(redis);
+
+const memoryClaimWaitingPlayer = (playerId: string): string | null => {
+    cleanupMemoryStore();
+    const waiting = memoryStore.waitingPlayer;
+    if (!waiting || waiting === playerId) {
+        memoryStore.waitingPlayer = playerId;
+        return null;
+    }
+    memoryStore.waitingPlayer = null;
+    return waiting;
+};
 
 export const claimWaitingPlayer = async (playerId: string): Promise<string | null> => {
     if (!redis) {
-        const waiting = memoryStore.waitingPlayer;
-        if (!waiting || waiting === playerId) {
-            memoryStore.waitingPlayer = playerId;
+        return memoryClaimWaitingPlayer(playerId);
+    }
+    try {
+        const result = (await redis.eval(CLAIM_WAITING_LUA, [WAITING_KEY], [playerId])) as string | null;
+        if (!result || result === EMPTY_VALUE) {
             return null;
         }
-        memoryStore.waitingPlayer = null;
-        return waiting;
+        return result;
+    } catch (error) {
+        handleRedisError('claimWaitingPlayer', error);
+        return memoryClaimWaitingPlayer(playerId);
     }
-
-    const result = (await redis.eval(CLAIM_WAITING_LUA, [WAITING_KEY], [playerId])) as string | null;
-    if (!result || result === EMPTY_VALUE) {
-        return null;
-    }
-    return result;
 };
 
 export const setWaitingPlayer = async (playerId: string | null) => {
+    cleanupMemoryStore();
     if (!redis) {
         memoryStore.waitingPlayer = playerId;
         return;
     }
-
-    if (!playerId) {
-        await redis.del(WAITING_KEY);
-        return;
+    try {
+        if (!playerId) {
+            await redis.del(WAITING_KEY);
+        } else {
+            await redis.set(WAITING_KEY, playerId);
+        }
+    } catch (error) {
+        handleRedisError('setWaitingPlayer', error);
+        memoryStore.waitingPlayer = playerId;
     }
-
-    await redis.set(WAITING_KEY, playerId);
 };
 
 export const clearWaitingPlayer = async (playerId: string) => {
+    cleanupMemoryStore();
     if (!redis) {
         if (memoryStore.waitingPlayer === playerId) {
             memoryStore.waitingPlayer = null;
         }
         return;
     }
-
-    await redis.eval(CLEAR_WAITING_LUA, [WAITING_KEY], [playerId]);
+    try {
+        await redis.eval(CLEAR_WAITING_LUA, [WAITING_KEY], [playerId]);
+    } catch (error) {
+        handleRedisError('clearWaitingPlayer', error);
+        if (memoryStore.waitingPlayer === playerId) {
+            memoryStore.waitingPlayer = null;
+        }
+    }
 };
 
 export const getAssignment = async (playerId: string): Promise<PlayerAssignment | null> => {
+    cleanupMemoryStore();
     if (!redis) {
         return memoryStore.assignments.get(playerId) ?? null;
     }
-    const value = await redis.get<PlayerAssignment | string>(assignmentKey(playerId));
-    return parseStoredValue<PlayerAssignment>(value);
+    try {
+        const value = await redis.get<PlayerAssignment | string>(assignmentKey(playerId));
+        return parseStoredValue<PlayerAssignment>(value);
+    } catch (error) {
+        handleRedisError('getAssignment', error);
+        return memoryStore.assignments.get(playerId) ?? null;
+    }
 };
 
 export const setAssignment = async (playerId: string, assignment: PlayerAssignment) => {
+    cleanupMemoryStore();
     if (!redis) {
         memoryStore.assignments.set(playerId, assignment);
         return;
     }
-
-    await redis.set(assignmentKey(playerId), serialize(assignment), { ex: GAME_TTL_SECONDS });
+    try {
+        await redis.set(assignmentKey(playerId), serialize(assignment), { ex: GAME_TTL_SECONDS });
+    } catch (error) {
+        handleRedisError('setAssignment', error);
+        memoryStore.assignments.set(playerId, assignment);
+    }
 };
 
 export const removeAssignment = async (playerId: string) => {
+    cleanupMemoryStore();
     if (!redis) {
         memoryStore.assignments.delete(playerId);
         return;
     }
-
-    await redis.del(assignmentKey(playerId));
+    try {
+        await redis.del(assignmentKey(playerId));
+    } catch (error) {
+        handleRedisError('removeAssignment', error);
+        memoryStore.assignments.delete(playerId);
+    }
 };
 
 export const getGameRecord = async (gameId: string): Promise<GameRecord | null> => {
+    cleanupMemoryStore();
     if (!redis) {
         return memoryStore.games.get(gameId) ?? null;
     }
-
-    const value = await redis.get<GameRecord | string>(gameKey(gameId));
-    return parseStoredValue<GameRecord>(value);
+    try {
+        const value = await redis.get<GameRecord | string>(gameKey(gameId));
+        return parseStoredValue<GameRecord>(value);
+    } catch (error) {
+        handleRedisError('getGameRecord', error);
+        return memoryStore.games.get(gameId) ?? null;
+    }
 };
 
 export const saveGameRecord = async (record: GameRecord) => {
+    cleanupMemoryStore();
     if (!redis) {
         memoryStore.games.set(record.id, record);
         return;
     }
-
-    await redis.set(gameKey(record.id), serialize(record), { ex: GAME_TTL_SECONDS });
+    try {
+        await redis.set(gameKey(record.id), serialize(record), { ex: GAME_TTL_SECONDS });
+    } catch (error) {
+        handleRedisError('saveGameRecord', error);
+        memoryStore.games.set(record.id, record);
+    }
 };
 
 export const updateGameFen = async (gameId: string, fen: string) => {
+    cleanupMemoryStore();
     if (!redis) {
         const record = memoryStore.games.get(gameId);
         if (!record) {
@@ -205,43 +314,74 @@ export const updateGameFen = async (gameId: string, fen: string) => {
         memoryStore.games.set(gameId, record);
         return;
     }
-
-    const record = await getGameRecord(gameId);
-    if (!record) {
-        return;
-    }
-    record.fen = fen;
-    record.lastUpdated = Date.now();
-    await saveGameRecord(record);
-};
-
-export const removeGameRecord = async (gameId: string) => {
-    if (!redis) {
+    try {
+        await redis.eval(UPDATE_FEN_LUA, [gameKey(gameId)], [fen, Date.now().toString(), GAME_TTL_SECONDS.toString()]);
+    } catch (error) {
+        handleRedisError('updateGameFen', error);
         const record = memoryStore.games.get(gameId);
         if (!record) {
             return;
         }
-        memoryStore.games.delete(gameId);
-        await removeAssignment(record.players.white);
-        await removeAssignment(record.players.black);
-        return;
+        record.fen = fen;
+        record.lastUpdated = Date.now();
+        memoryStore.games.set(gameId, record);
     }
+};
 
-    const record = await getGameRecord(gameId);
+const removeGameFromMemory = (gameId: string) => {
+    const record = memoryStore.games.get(gameId);
     if (!record) {
         return;
     }
-    await redis.del(gameKey(gameId));
-    await removeAssignment(record.players.white);
-    await removeAssignment(record.players.black);
+    memoryStore.games.delete(gameId);
+    memoryStore.assignments.delete(record.players.white);
+    memoryStore.assignments.delete(record.players.black);
+};
+
+export const removeGameRecord = async (gameId: string) => {
+    cleanupMemoryStore();
+    if (!redis) {
+        removeGameFromMemory(gameId);
+        return;
+    }
+    try {
+        await redis.eval(REMOVE_GAME_LUA, [gameKey(gameId)], [ASSIGNMENT_PREFIX]);
+    } catch (error) {
+        handleRedisError('removeGameRecord', error);
+        removeGameFromMemory(gameId);
+    }
 };
 
 export const ensureGameRecord = async (gameId: string, create: () => GameRecord): Promise<GameRecord> => {
-    const existing = await getGameRecord(gameId);
-    if (existing) {
-        return existing;
+    cleanupMemoryStore();
+    const memoryEnsure = () => {
+        const existing = memoryStore.games.get(gameId);
+        if (existing) {
+            return existing;
+        }
+        const next = create();
+        memoryStore.games.set(gameId, next);
+        return next;
+    };
+
+    if (!redis) {
+        return memoryEnsure();
     }
-    const next = create();
-    await saveGameRecord(next);
-    return next;
+
+    const candidate = create();
+    const serialized = serialize(candidate);
+    try {
+        const result = await redis.eval(ENSURE_GAME_LUA, [gameKey(gameId)], [serialized, GAME_TTL_SECONDS.toString()]);
+        return parseStoredValue<GameRecord>(result) ?? candidate;
+    } catch (error) {
+        handleRedisError('ensureGameRecord', error);
+        return memoryEnsure();
+    }
+};
+
+export const __resetMemoryStore = () => {
+    memoryStore.waitingPlayer = null;
+    memoryStore.games.clear();
+    memoryStore.assignments.clear();
+    lastMemoryCleanup = 0;
 };

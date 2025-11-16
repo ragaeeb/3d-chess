@@ -12,13 +12,13 @@ export const createPusherClient = (playerId: string) => {
         throw new Error('Missing NEXT_PUBLIC_PUSHER_CLUSTER environment variable');
     }
 
+    if (!playerId || !playerId.trim()) {
+        throw new Error('playerId is required to initialise Pusher');
+    }
+
     return new Pusher(key, {
         cluster,
         forceTLS: true,
-        channelAuthorization: {
-            endpoint: '/.netlify/functions/pusherAuth',
-            transport: 'ajax',
-            params: { playerId },
-        },
+        channelAuthorization: { endpoint: '/.netlify/functions/pusherAuth', transport: 'ajax', params: { playerId } },
     });
 };

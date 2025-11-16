@@ -1,38 +1,15 @@
-import type { NextRequest } from 'next/server';
-import { NextResponse } from 'next/server';
-
 import { handler as netlifyMoveHandler } from '../../../../netlify/functions/move';
-
-type NetlifyHandler = typeof netlifyMoveHandler;
-type NetlifyEvent = Parameters<NetlifyHandler>[0];
-type NetlifyResult = Awaited<ReturnType<NetlifyHandler>>;
+import { createNetlifyBridge } from '../utils/bridge';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const toNetlifyHeaders = (request: NextRequest) => {
-    const headers: Record<string, string> = {};
-    request.headers.forEach((value, key) => {
-        headers[key] = value;
-    });
-    return headers;
-};
+const handleRequest = createNetlifyBridge(netlifyMoveHandler);
 
-const toNetlifyEvent = async (request: NextRequest): Promise<NetlifyEvent> => ({
-    httpMethod: request.method,
-    headers: toNetlifyHeaders(request),
-    body: request.method === 'GET' ? null : await request.text(),
-});
-
-const toNextResponse = (result: NetlifyResult) =>
-    new NextResponse(result.body, { status: result.statusCode, headers: result.headers });
-
-export async function OPTIONS(request: NextRequest) {
-    const result = await netlifyMoveHandler(await toNetlifyEvent(request));
-    return toNextResponse(result);
+export async function OPTIONS(request: Request) {
+    return handleRequest(request);
 }
 
-export async function POST(request: NextRequest) {
-    const result = await netlifyMoveHandler(await toNetlifyEvent(request));
-    return toNextResponse(result);
+export async function POST(request: Request) {
+    return handleRequest(request);
 }
