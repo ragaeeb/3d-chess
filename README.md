@@ -1,7 +1,7 @@
 # 3D Chess
 
 [![wakatime](https://wakatime.com/badge/user/a0b906ce-b8e7-4463-8bce-383238df6d4b/project/0df08abe-0892-405c-901d-684ff8cb7af1.svg)](https://wakatime.com/badge/user/a0b906ce-b8e7-4463-8bce-383238df6d4b/project/0df08abe-0892-405c-901d-684ff8cb7af1)
-[![codecov](https://codecov.io/gh/ragaeeb/3d-chess/graph/badge.svg?token=5DKNZ728JV)](https://codecov.io/gh/ragaeeb/3d-chess)
+[![codecov](https://codecov.io/gh/ragaeeb/chessie/graph/badge.svg?token=5DKNZ728JV)](https://codecov.io/gh/ragaeeb/chessie)
 [![Netlify Status](https://api.netlify.com/api/v1/badges/3ce1cbce-bc5f-4f5b-b0af-4b24bb30b4de/deploy-status)](https://app.netlify.com/projects/chessie/deploys)
 
 An immersive multiplayer 3D chess experience built with Next.js 16 and Bun. The project now relies on serverless Netlify Functions powered by Pusher Channels for real-time multiplayer rather than a traditional long-running server.
