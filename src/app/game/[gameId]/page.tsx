@@ -1,66 +1,60 @@
 'use client';
 
 import { Canvas } from '@react-three/fiber';
-import { Chess, type Square } from 'chess.js';
 import { useParams } from 'next/navigation';
-import type Pusher from 'pusher-js';
-import type { Channel, PresenceChannel } from 'pusher-js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import ChessBoard from '@/components/3d/chessBoard';
 import GameStatusPanel from '@/components/GameStatusPanel';
 import ShareGameLink from '@/components/ShareGameLink';
 import { ensurePlayerId } from '@/lib/playerIdentity';
-import { createPusherClient } from '@/lib/pusherClient';
-import type { ChessMove, GameStatus, PlayerRole } from '@/types/game';
-import { GAME_OVER, INIT_GAME, MOVE, OPPONENT_LEFT } from '@/types/socket';
-
-type GameStartPayload = {
-    status: 'matched' | 'already-playing';
-    gameId: string;
-    color: 'white' | 'black';
-    fen: string;
-};
-
-type MoveBroadcastPayload = {
-    playerId: string;
-    move: { from: string; to: string; promotion?: string; captured?: string };
-    fen: string;
-    turn: string;
-    check?: boolean;
-};
-
-type GameOverPayload = { winner?: 'white' | 'black' | null; reason?: string; fen?: string };
-
-type ConnectionState = 'connected' | 'connecting' | 'disconnected';
+import { type JoinGameResponse, joinGame, notifyLeave, submitMove } from '@/lib/gameApi';
+import { useChessGame } from '@/hooks/useChessGame';
+import { usePusherConnection } from '@/hooks/usePusherConnection';
+import { useGameChannel, usePlayerChannel } from '@/hooks/useGameSubscription';
+import type { GameStatus, PlayerRole } from '@/types/game';
+import type { Square } from 'chess.js';
 
 const GamePage: React.FC = () => {
     const params = useParams();
     const gameId = params.gameId as string;
     const [playerId, setPlayerId] = useState<string | null>(null);
-    const [game] = useState(() => new Chess());
-    const [board, setBoard] = useState(() => game.board());
-    const [lastMove, setLastMove] = useState<ChessMove | null>(null);
+    
+    // Game State
+    const { 
+        board, 
+        lastMove, 
+        setLastMove, 
+        turn, 
+        isCheck, 
+        isCheckmate, 
+        resetGame, 
+        loadFen, 
+        makeMove, 
+        undoMove, 
+        getLegalMoves 
+    } = useChessGame();
+
+    // UI State
     const [gameStatus, setGameStatus] = useState<GameStatus>('not-started');
     const [playerColor, setPlayerColor] = useState<'white' | 'black' | null>(null);
     const [role, setRole] = useState<PlayerRole | null>(null);
     const [message, setMessage] = useState<string | null>(null);
     const [bannerMessage, setBannerMessage] = useState<string | null>(null);
-    const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
     const [showShareLink, setShowShareLink] = useState(false);
-
-    const [pusherClient, setPusherClient] = useState<Pusher | null>(null);
-    const gameChannelRef = useRef<Channel | null>(null);
-    const presenceChannelRef = useRef<PresenceChannel | null>(null);
     const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const isConnected = connectionState === 'connected';
     const isSpectator = role === 'spectator';
+
+    // Pusher Connection
+    const { pusherClient, connectionState } = usePusherConnection(playerId);
+    const isConnected = connectionState === 'connected';
 
     useEffect(() => {
         setPlayerId(ensurePlayerId());
     }, []);
 
+    // Banner Logic
     const clearBanner = useCallback(() => {
         if (bannerTimeoutRef.current) {
             clearTimeout(bannerTimeoutRef.current);
@@ -69,25 +63,15 @@ const GamePage: React.FC = () => {
         setBannerMessage(null);
     }, []);
 
-    const resetBoard = useCallback(() => {
-        game.reset();
-        setBoard(game.board());
-        setLastMove(null);
-        clearBanner();
-    }, [game, clearBanner]);
-
     const updateBannerFromGame = useCallback(() => {
-        if (bannerTimeoutRef.current) {
-            clearTimeout(bannerTimeoutRef.current);
-            bannerTimeoutRef.current = null;
-        }
+        clearBanner();
 
-        if (game.isCheckmate()) {
+        if (isCheckmate) {
             setBannerMessage('Checkmate');
             return;
         }
 
-        if (game.isCheck()) {
+        if (isCheck) {
             setBannerMessage('Check');
             bannerTimeoutRef.current = setTimeout(() => {
                 setBannerMessage(null);
@@ -95,374 +79,220 @@ const GamePage: React.FC = () => {
             }, 2000);
             return;
         }
+    }, [isCheck, isCheckmate, clearBanner]);
 
-        setBannerMessage(null);
-    }, [game]);
-
-    const cleanupChannels = useCallback(() => {
-        if (pusherClient && gameChannelRef.current) {
-            gameChannelRef.current.unbind_all();
-            pusherClient.unsubscribe(gameChannelRef.current.name);
-            gameChannelRef.current = null;
+    // Effect to update banner when game state changes (check/checkmate)
+    useEffect(() => {
+        if (gameStatus === 'started') {
+            updateBannerFromGame();
         }
+    }, [gameStatus, updateBannerFromGame]);
 
-        if (pusherClient && presenceChannelRef.current) {
-            presenceChannelRef.current.unbind_all();
-            pusherClient.unsubscribe(presenceChannelRef.current.name);
-            presenceChannelRef.current = null;
-        }
-    }, [pusherClient]);
 
-    const notifyLeave = useCallback(() => {
-        if (!gameId || !playerId) {
-            return;
-        }
-
-        const payload = JSON.stringify({ action: 'leave', playerId, gameId });
-
-        if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
-            try {
-                const blob = new Blob([payload], { type: 'application/json' });
-                navigator.sendBeacon('/.netlify/functions/move', blob);
-            } catch (error) {
-                console.error('Failed to send leave beacon', error);
-            }
-        } else {
-            void fetch('/.netlify/functions/move', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: payload,
-                keepalive: true,
-            }).catch((error) => {
-                console.error('Failed to notify leave', error);
-            });
-        }
-    }, [gameId, playerId]);
+    const handleReset = useCallback(() => {
+        resetGame();
+        clearBanner();
+    }, [resetGame, clearBanner]);
 
     const handleOpponentLeft = useCallback(() => {
-        cleanupChannels();
         setGameStatus('not-started');
         setPlayerColor(null);
         setRole(null);
         setMessage('Your opponent has left the game. Create a new match to keep playing.');
         setShowShareLink(false);
-        resetBoard();
-    }, [cleanupChannels, resetBoard]);
+        handleReset();
+    }, [handleReset]);
 
-    const handleGameOver = useCallback(
-        (payload: GameOverPayload) => {
-            cleanupChannels();
-
-            if (payload.fen) {
-                try {
-                    game.load(payload.fen);
-                    setBoard(game.board());
-                } catch (error) {
-                    console.error('Failed to load final position', error);
-                }
-            }
-
-            if (payload.winner) {
-                setBannerMessage(`Game Over - ${payload.winner} wins`);
-                setMessage(null);
-            } else {
-                setBannerMessage('Game Over');
-            }
-
-            setGameStatus('not-started');
-            setRole(null);
-            setPlayerColor(null);
-        },
-        [cleanupChannels, game],
-    );
-
-    const handleIncomingMove = useCallback(
-        (data: MoveBroadcastPayload) => {
-            try {
-                game.load(data.fen);
-                setBoard(game.board());
-                setLastMove({
-                    from: data.move.from as Square,
-                    to: data.move.to as Square,
-                    captured: data.move.captured,
-                });
-                updateBannerFromGame();
-                setMessage(null);
-            } catch (error) {
-                console.error('Failed to process move payload', error);
-            }
-        },
-        [game, updateBannerFromGame],
-    );
-
-    const subscribeToGameChannels = useCallback(
-        (client: Pusher, nextGameId: string) => {
-            cleanupChannels();
-
-            const privateChannel = client.subscribe(`private-game-${nextGameId}`);
-            gameChannelRef.current = privateChannel;
-
-            privateChannel.bind(MOVE, handleIncomingMove);
-            privateChannel.bind(GAME_OVER, handleGameOver);
-            privateChannel.bind(OPPONENT_LEFT, handleOpponentLeft);
-
-            const presenceChannel = client.subscribe(`presence-game-${nextGameId}`) as PresenceChannel;
-            presenceChannelRef.current = presenceChannel;
-
-            presenceChannel.bind('pusher:member_removed', (member: { id: string }) => {
-                if (member?.id && member.id !== playerId) {
-                    setMessage('Your opponent disconnected.');
-                }
-            });
-        },
-        [cleanupChannels, handleGameOver, handleIncomingMove, handleOpponentLeft, playerId],
-    );
-
-    const startMatch = useCallback(
-        (payload: GameStartPayload) => {
-            if (payload.gameId !== gameId) {
-                return;
-            }
-
-            const { color, fen } = payload;
-            setRole(color);
-            setPlayerColor(color);
-            setGameStatus('started');
-            setMessage(null);
-            setShowShareLink(false);
-            clearBanner();
-
-            try {
-                game.load(fen);
-                setBoard(game.board());
-            } catch (error) {
-                console.error('Failed to load game state', error);
-                resetBoard();
-            }
-            setLastMove(null);
-            if (pusherClient) {
-                subscribeToGameChannels(pusherClient, payload.gameId);
-            }
-        },
-        [clearBanner, game, gameId, pusherClient, resetBoard, subscribeToGameChannels],
-    );
-
-    useEffect(() => {
-        if (!playerId) {
-            return;
+    const handleGameOver = useCallback((payload: { winner?: 'white' | 'black' | null; reason?: string; fen?: string }) => {
+        if (payload.fen) {
+            loadFen(payload.fen);
         }
 
-        let client: Pusher | null = null;
+        if (payload.winner) {
+            setBannerMessage(`Game Over - ${payload.winner} wins`);
+            setMessage(null);
+        } else {
+            setBannerMessage('Game Over');
+        }
+
+        setGameStatus('not-started');
+        setRole(null);
+        setPlayerColor(null);
+    }, [loadFen]);
+
+    const handleIncomingMove = useCallback((data: { 
+        playerId: string; 
+        move: { from: string; to: string; promotion?: string; captured?: string }; 
+        fen: string; 
+        turn: string; 
+        check?: boolean; 
+    }) => {
+        try {
+            loadFen(data.fen);
+            setLastMove({
+                from: data.move.from as Square,
+                to: data.move.to as Square,
+                captured: data.move.captured,
+            });
+            setMessage(null);
+        } catch (error) {
+            console.error('Failed to process move payload', error);
+        }
+    }, [loadFen, setLastMove]);
+
+    const handleOpponentDisconnected = useCallback(() => {
+        setMessage('Your opponent disconnected.');
+    }, []);
+
+    const handleMatchStart = useCallback((payload: { 
+        status: 'matched' | 'already-playing'; 
+        gameId: string; 
+        color: 'white' | 'black'; 
+        fen: string; 
+    }) => {
+        if (payload.gameId !== gameId) return;
+
+        const { color, fen } = payload;
+        setRole(color);
+        setPlayerColor(color);
+        setGameStatus('started');
+        setMessage(null);
+        setShowShareLink(false);
+        clearBanner();
 
         try {
-            client = createPusherClient(playerId);
-            setPusherClient(client);
+            loadFen(fen);
+            setLastMove(null);
         } catch (error) {
-            console.error('Failed to create Pusher client', error);
-            setMessage('Unable to initialise realtime connection.');
-            setConnectionState('disconnected');
-            return () => {};
+            console.error('Failed to load game state', error);
+            handleReset();
+        }
+    }, [gameId, loadFen, setLastMove, clearBanner, handleReset]);
+
+    const handleSubscriptionError = useCallback(() => {
+        setMessage('Unable to join private channel. Check your Pusher credentials.');
+    }, []);
+
+    // Subscriptions
+    usePlayerChannel(pusherClient, playerId, handleMatchStart, handleSubscriptionError);
+
+    useGameChannel(
+        pusherClient, 
+        gameId, 
+        playerId, 
+        gameStatus !== 'not-started', // Subscribe only if we have joined/started
+        {
+            onMove: handleIncomingMove,
+            onGameOver: handleGameOver,
+            onOpponentLeft: handleOpponentLeft,
+            onOpponentDisconnected: handleOpponentDisconnected
+        }
+    );
+
+    const handleJoinResult = useCallback((result: JoinGameResponse) => {
+        if (result.role === 'spectator') {
+            setRole('spectator');
+            setGameStatus('started');
+            setMessage('You are spectating this game');
+            setShowShareLink(false);
+        } else if (result.color) {
+            setPlayerColor(result.color);
+            setRole(result.color);
+
+            if (result.status === 'waiting') {
+                setGameStatus('waiting-opponent');
+                setMessage('Waiting for opponent to join...');
+                setShowShareLink(true);
+            } else if (result.status === 'active') {
+                setGameStatus('started');
+                setMessage(null);
+                setShowShareLink(false);
+            }
         }
 
-        const handleConnected = () => setConnectionState('connected');
-        const handleConnecting = () => setConnectionState('connecting');
-        const handleDisconnected = () => setConnectionState('disconnected');
+        if (result.fen) {
+            loadFen(result.fen);
+        }
+    }, [loadFen]);
 
-        client.connection.bind('connected', handleConnected);
-        client.connection.bind('connecting', handleConnecting);
-        client.connection.bind('disconnected', handleDisconnected);
-        client.connection.bind('unavailable', handleDisconnected);
-
-        return () => {
-            client?.disconnect();
-            setConnectionState('disconnected');
-        };
-    }, [playerId]);
-
+    // Join Game Logic
     useEffect(() => {
-        if (!pusherClient || !playerId) {
-            return;
-        }
-
-        const channelName = `private-player-${playerId}`;
-        const playerChannel = pusherClient.subscribe(channelName);
-
-        playerChannel.bind(INIT_GAME, (payload: GameStartPayload) => {
-            startMatch(payload);
-        });
-
-        playerChannel.bind('pusher:subscription_error', () => {
-            setMessage('Unable to join private channel. Check your Pusher credentials.');
-            setConnectionState('disconnected');
-        });
-
-        return () => {
-            playerChannel.unbind_all();
-            pusherClient.unsubscribe(channelName);
-        };
-    }, [playerId, pusherClient, startMatch]);
-
-    useEffect(() => {
-        if (!gameId || !pusherClient || !playerId) {
-            return;
-        }
+        if (!gameId || !playerId) return;
 
         let cancelled = false;
 
-        const joinGame = async () => {
+        const performJoin = async () => {
             try {
-                const response = await fetch('/.netlify/functions/move', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'join', playerId, gameId }),
-                });
+                const result = await joinGame(gameId, playerId);
+                
+                if (cancelled) return;
 
-                if (!response.ok) {
-                    const error = await response.json().catch(() => ({ error: 'Failed to join game' }));
-                    if (!cancelled) {
-                        setMessage(error.error ?? 'Game not found');
-                    }
-                    return;
-                }
-
-                const result = await response.json();
-                if (cancelled) {
-                    return;
-                }
-
-                if (result.role === 'spectator') {
-                    setRole('spectator');
-                    setGameStatus('started');
-                    setMessage('You are spectating this game');
-                    setShowShareLink(false);
-                } else if (result.color) {
-                    setPlayerColor(result.color);
-                    setRole(result.color);
-
-                    if (result.status === 'waiting') {
-                        setGameStatus('waiting-opponent');
-                        setMessage('Waiting for opponent to join...');
-                        setShowShareLink(true);
-                    } else if (result.status === 'active') {
-                        setGameStatus('started');
-                        setMessage(null);
-                        setShowShareLink(false);
-                    }
-                }
-
-                try {
-                    game.load(result.fen);
-                    setBoard(game.board());
-                } catch (error) {
-                    console.error('Failed to load game state', error);
-                }
-
-                subscribeToGameChannels(pusherClient, gameId);
-            } catch (error) {
+                handleJoinResult(result);
+            } catch (error: any) {
                 console.error('Failed to join game', error);
                 if (!cancelled) {
-                    setMessage('Failed to join game. Please try again.');
+                    setMessage(error.message || 'Failed to join game. Please try again.');
                 }
             }
         };
 
-        joinGame();
+        performJoin();
 
         return () => {
             cancelled = true;
         };
-    }, [game, gameId, playerId, pusherClient, subscribeToGameChannels]);
+    }, [gameId, playerId, handleJoinResult]);
 
+    // Leave Notification
     useEffect(() => {
         const handleBeforeUnload = () => {
-            notifyLeave();
+            if (gameId && playerId) {
+                notifyLeave(gameId, playerId);
+            }
         };
 
         window.addEventListener('beforeunload', handleBeforeUnload);
         return () => {
             window.removeEventListener('beforeunload', handleBeforeUnload);
-            notifyLeave();
+            if (gameId && playerId) {
+                notifyLeave(gameId, playerId);
+            }
         };
-    }, [notifyLeave]);
+    }, [gameId, playerId]);
 
-    useEffect(() => () => cleanupChannels(), [cleanupChannels]);
+    // Local Move Handler
+    const handleLocalMove = useCallback((move: { from: string; to: string }) => {
+        if (isSpectator) {
+            setMessage('You are spectating this game');
+            return;
+        }
 
-    const handleLocalMove = useCallback(
-        (move: { from: string; to: string }) => {
-            if (isSpectator) {
-                setMessage('You are spectating this game');
-                return;
-            }
+        if (gameStatus !== 'started' || !playerColor || !playerId) {
+            return;
+        }
 
-            if (gameStatus !== 'started' || !playerColor || !playerId) {
-                return;
-            }
+        const expectedTurn = playerColor === 'white' ? 'w' : 'b';
+        if (turn !== expectedTurn) {
+            setMessage("It isn't your turn yet.");
+            return;
+        }
 
-            const expectedTurn = playerColor === 'white' ? 'w' : 'b';
-            if (game.turn() !== expectedTurn) {
-                setMessage("It isn't your turn yet.");
-                return;
-            }
+        const result = makeMove(move);
 
-            const availableMoves = game.moves({ square: move.from as Square, verbose: true });
-            const isLegalDestination = availableMoves.some((m) => m.to === move.to);
-            if (!isLegalDestination) {
-                setMessage('Illegal move');
-                return;
-            }
+        if (!result) {
+            setMessage('Illegal move');
+            return;
+        }
 
-            const targetSquare = game.get(move.to as Square);
-            const captured = targetSquare ? targetSquare.type : undefined;
+        setMessage(null);
+        // Banner update handled by effect
 
-            const result = game.move({ from: move.from as Square, to: move.to as Square, promotion: 'q' });
-
-            if (!result) {
-                setMessage('Illegal move');
-                return;
-            }
-
-            setLastMove({ from: move.from as Square, to: move.to as Square, captured });
-            setBoard(game.board());
-            setMessage(null);
-            updateBannerFromGame();
-
-            fetch('/.netlify/functions/move', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'move', playerId, move }),
-            })
-                .then(async (response) => {
-                    if (response.ok) {
-                        return;
-                    }
-                    const error = await response.json().catch(() => ({ error: 'Failed to send move to server' }));
-                    setMessage(error.error ?? 'Failed to send move to server');
-                    game.undo();
-                    setBoard(game.board());
-                    setLastMove(null);
-                    updateBannerFromGame();
-                })
-                .catch((error) => {
-                    console.error('Failed to send move', error);
-                    setMessage('Failed to send move to server');
-                    game.undo();
-                    setBoard(game.board());
-                    setLastMove(null);
-                    updateBannerFromGame();
-                });
-        },
-        [game, gameStatus, isSpectator, playerColor, playerId, updateBannerFromGame],
-    );
-
-    const getLegalMoves = useCallback(
-        (square: Square): Square[] => {
-            const moves = game.moves({ square, verbose: true });
-            return moves.map((m) => m.to as Square);
-        },
-        [game],
-    );
-
-    const turn = game.turn();
+        submitMove(playerId, move).catch((error) => {
+            console.error('Failed to send move', error);
+            setMessage('Failed to send move to server');
+            undoMove();
+        });
+    }, [isSpectator, gameStatus, playerColor, playerId, turn, makeMove, undoMove]);
 
     return (
         <div className="relative h-screen">
