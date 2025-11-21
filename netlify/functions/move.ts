@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Chess } from 'chess.js';
 import { GAME_OVER, INIT_GAME, MOVE, OPPONENT_LEFT } from '../../src/types/socket';
+import type { GameRecord, JoinGameDecision, PlayerColor } from './utils/gameStore';
 import {
     claimWaitingPlayer,
     clearWaitingPlayer,
@@ -15,7 +16,6 @@ import {
     setWaitingPlayer,
     updateGameFen,
 } from './utils/gameStore';
-import type { PlayerColor, GameRecord, JoinGameDecision } from './utils/gameStore';
 import type { NetlifyEvent, NetlifyResponse } from './utils/http';
 import { jsonResponse, textResponse } from './utils/http';
 import { getServerPusher } from './utils/pusher';
@@ -41,20 +41,21 @@ const getOpponentId = (game: GameRecord, color: PlayerColor) =>
 const handleCreateGame = async (playerId: string): Promise<NetlifyResponse> => {
     const gameId = randomUUID();
     const chess = new Chess();
+    const playerColor: PlayerColor = Math.random() < 0.5 ? 'white' : 'black';
 
     const record: GameRecord = {
         id: gameId,
         fen: chess.fen(),
-        players: { white: playerId, black: null },
+        players: { white: playerColor === 'white' ? playerId : null, black: playerColor === 'black' ? playerId : null },
         spectators: [],
         lastUpdated: Date.now(),
         status: 'waiting',
     };
 
     await saveGameRecord(record);
-    await setAssignment(playerId, { gameId, color: 'white' });
+    await setAssignment(playerId, { gameId, color: playerColor });
 
-    return respond(200, { gameId, color: 'white', status: 'waiting', fen: record.fen });
+    return respond(200, { gameId, color: playerColor, status: 'waiting', fen: record.fen });
 };
 
 const handleJoinGame = async (playerId: string, gameId: string): Promise<NetlifyResponse> => {
@@ -67,19 +68,26 @@ const handleJoinGame = async (playerId: string, gameId: string): Promise<Netlify
             return respond(200, { gameId, role: 'spectator', fen: game.fen, status: game.status });
         }
 
-        if (decision.status === 'black') {
-            await setAssignment(playerId, { gameId, color: 'black' });
-            try {
-                await getServerPusher().trigger(`private-player-${game.players.white}`, INIT_GAME, {
-                    status: 'matched',
-                    gameId,
-                    color: 'white',
-                    fen: game.fen,
-                });
-            } catch (error) {
-                console.error('Failed to notify white player', error);
+        if (decision.status === 'black' || decision.status === 'white') {
+            const color = decision.status;
+            await setAssignment(playerId, { gameId, color });
+
+            const opponentColor = color === 'white' ? 'black' : 'white';
+            const opponentId = color === 'white' ? game.players.black : game.players.white;
+
+            if (opponentId) {
+                try {
+                    await getServerPusher().trigger(`private-player-${opponentId}`, INIT_GAME, {
+                        status: 'matched',
+                        gameId,
+                        color: opponentColor,
+                        fen: game.fen,
+                    });
+                } catch (error) {
+                    console.error(`Failed to notify ${opponentColor} player`, error);
+                }
             }
-            return respond(200, { gameId, color: 'black', fen: game.fen, status: game.status });
+            return respond(200, { gameId, color, fen: game.fen, status: game.status });
         }
 
         return respond(404, { error: 'Game not found' });
@@ -111,7 +119,7 @@ const handleJoinGame = async (playerId: string, gameId: string): Promise<Netlify
         return respondForDecision({ status: 'existing', color: 'black' }, game);
     }
 
-    if (game.status === 'active' || game.players.black) {
+    if (game.status === 'active' || (game.players.black && game.players.white)) {
         if (!game.spectators.includes(playerId)) {
             game.spectators.push(playerId);
             await saveGameRecord(game);
@@ -119,12 +127,18 @@ const handleJoinGame = async (playerId: string, gameId: string): Promise<Netlify
         return respondForDecision({ status: 'spectator' }, game);
     }
 
-    game.players.black = playerId;
+    const colorToJoin = !game.players.white ? 'white' : 'black';
+    if (colorToJoin === 'white') {
+        game.players.white = playerId;
+    } else {
+        game.players.black = playerId;
+    }
+
     game.status = 'active';
     game.lastUpdated = Date.now();
     await saveGameRecord(game);
 
-    return respondForDecision({ status: 'black' }, game);
+    return respondForDecision({ status: colorToJoin }, game);
 };
 
 const triggerGameStart = async (
@@ -159,21 +173,25 @@ const handleQueue = async (playerId: string): Promise<NetlifyResponse> => {
     const chess = new Chess();
     const fen = chess.fen();
 
+    const isWaitingWhite = Math.random() < 0.5;
+    const whitePlayer = isWaitingWhite ? waiting : playerId;
+    const blackPlayer = isWaitingWhite ? playerId : waiting;
+
     const record: GameRecord = {
         id: gameId,
         fen,
-        players: { white: waiting, black: playerId },
+        players: { white: whitePlayer, black: blackPlayer },
         spectators: [],
         lastUpdated: Date.now(),
         status: 'active',
     };
 
     await saveGameRecord(record);
-    await setAssignment(waiting, { gameId, color: 'white' });
-    await setAssignment(playerId, { gameId, color: 'black' });
+    await setAssignment(whitePlayer, { gameId, color: 'white' });
+    await setAssignment(blackPlayer, { gameId, color: 'black' });
 
     try {
-        await triggerGameStart(waiting, { status: 'matched', gameId, color: 'white', fen });
+        await triggerGameStart(waiting, { status: 'matched', gameId, color: isWaitingWhite ? 'white' : 'black', fen });
     } catch (error) {
         console.error('Failed to notify waiting player about match', error);
         await removeGameRecord(gameId);
@@ -288,10 +306,7 @@ const handleLeave = async (playerId: string, targetGameId?: string): Promise<Net
         if (assignmentForResolvedGame) {
             const opponentId = getOpponentId(game, assignmentForResolvedGame.color);
             try {
-                await getServerPusher().trigger(`private-game-${game.id}`, OPPONENT_LEFT, {
-                    playerId,
-                    opponentId,
-                });
+                await getServerPusher().trigger(`private-game-${game.id}`, OPPONENT_LEFT, { playerId, opponentId });
             } catch (error) {
                 console.error('Failed to notify opponent about disconnect', error);
             }

@@ -5,16 +5,13 @@ export type PlayerColor = 'white' | 'black';
 export type GameRecord = {
     id: string;
     fen: string;
-    players: { white: string; black: string | null };
+    players: { white: string | null; black: string | null };
     spectators: string[];
     lastUpdated: number;
     status: 'waiting' | 'active' | 'finished';
 };
 
-export type PlayerAssignment = {
-    gameId: string;
-    color: PlayerColor;
-};
+export type PlayerAssignment = { gameId: string; color: PlayerColor };
 
 const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
 const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -77,7 +74,9 @@ const cleanupMemoryStore = () => {
     for (const [gameId, record] of memoryStore.games.entries()) {
         if (now - record.lastUpdated > STALE_MEMORY_WINDOW_MS) {
             memoryStore.games.delete(gameId);
-            memoryStore.assignments.delete(record.players.white);
+            if (record.players.white) {
+                memoryStore.assignments.delete(record.players.white);
+            }
             if (record.players.black) {
                 memoryStore.assignments.delete(record.players.black);
             }
@@ -162,7 +161,7 @@ end
 
 decoded.spectators = decoded.spectators or {}
 
-if decoded.status == 'active' or decoded.players.black then
+if decoded.status == 'active' or (decoded.players.black and decoded.players.white) then
   local already = false
   for _, id in ipairs(decoded.spectators) do
     if id == playerId then
@@ -177,6 +176,14 @@ if decoded.status == 'active' or decoded.players.black then
   end
 
   return cjson.encode({ status = 'spectator' })
+end
+
+if not decoded.players.white then
+  decoded.players.white = playerId
+  decoded.status = 'active'
+  decoded.lastUpdated = lastUpdated
+  redis.call('SET', gameKey, cjson.encode(decoded), 'EX', ttl)
+  return cjson.encode({ status = 'white' })
 end
 
 decoded.players.black = playerId
@@ -221,13 +228,10 @@ const handleRedisError = (context: string, error: unknown) => {
 export const isRedisBacked = Boolean(redis);
 
 export type JoinGameDecision =
-    | { status: 'not_found' | 'spectator' | 'black' }
+    | { status: 'not_found' | 'spectator' | 'black' | 'white' }
     | { status: 'existing'; color: PlayerColor };
 
-export const joinGameAtomically = async (
-    gameId: string,
-    playerId: string,
-): Promise<JoinGameDecision | null> => {
+export const joinGameAtomically = async (gameId: string, playerId: string): Promise<JoinGameDecision | null> => {
     cleanupMemoryStore();
     if (!redis) {
         return null;
@@ -410,7 +414,9 @@ const removeGameFromMemory = (gameId: string) => {
         return;
     }
     memoryStore.games.delete(gameId);
-    memoryStore.assignments.delete(record.players.white);
+    if (record.players.white) {
+        memoryStore.assignments.delete(record.players.white);
+    }
     if (record.players.black) {
         memoryStore.assignments.delete(record.players.black);
     }

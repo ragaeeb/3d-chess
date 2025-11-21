@@ -2,7 +2,10 @@ import type { Metadata } from 'next';
 import './globals.css';
 import type { ReactNode } from 'react';
 
-export const metadata: Metadata = { title: '3D Chess', description: 'Play immersive 3D chess in your browser.' };
+export const metadata: Metadata = {
+    title: 'Chessie',
+    description: 'Play multiplayer immersive 3D chess in your browser.',
+};
 
 export default function RootLayout({ children }: { children: ReactNode }) {
     return (
