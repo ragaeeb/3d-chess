@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/ragaeeb/chessie/compare/v1.1.0...v1.2.0) (2025-11-21)
+
+
+### Features
+
+* **camera:** Add camera panning and random color assignment ([#7](https://github.com/ragaeeb/chessie/issues/7)) ([1e6e3c0](https://github.com/ragaeeb/chessie/commit/1e6e3c08ff5896b7a3b18c04ed52c5d5deef2a05))
+
 # [1.1.0](https://github.com/ragaeeb/3d-chess/compare/v1.0.0...v1.1.0) (2025-11-16)
 
 
