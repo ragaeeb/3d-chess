@@ -1,8 +1,8 @@
 'use client';
 
-import { useParams } from 'next/navigation';
 import { Canvas } from '@react-three/fiber';
 import { Chess, type Square } from 'chess.js';
+import { useParams } from 'next/navigation';
 import type Pusher from 'pusher-js';
 import type { Channel, PresenceChannel } from 'pusher-js';
 import { useCallback, useEffect, useRef, useState } from 'react';
