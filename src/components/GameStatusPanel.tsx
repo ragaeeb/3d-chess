@@ -11,6 +11,8 @@ type GameStatusPanelProps = {
     playerColor: string | null;
     role: PlayerRole | null;
     turn: string;
+    cameraLocked: boolean;
+    onToggleCameraLock: () => void;
 };
 
 const GameStatusPanel: React.FC<GameStatusPanelProps> = ({
@@ -20,25 +22,21 @@ const GameStatusPanel: React.FC<GameStatusPanelProps> = ({
     playerColor,
     role,
     turn,
+    cameraLocked,
+    onToggleCameraLock,
 }) => {
     const [open, setOpen] = useState(true);
 
     return (
-        <div className="fixed right-8 bottom-8 z-10">
+        <div className="fixed right-0 bottom-0 left-0 z-10 md:right-8 md:bottom-8 md:left-auto">
             <motion.div
-                className="w-96 overflow-hidden rounded-2xl border border-white/20 bg-white/10 shadow-2xl backdrop-blur-xl"
+                className="w-full overflow-hidden rounded-t-2xl border border-white/20 bg-white/10 shadow-2xl backdrop-blur-xl md:w-96 md:rounded-2xl"
                 animate={{ height: open ? 'auto' : 70 }}
                 transition={{ type: 'spring', stiffness: 300, damping: 30 }}
                 layout
             >
-                <button
-                    type="button"
-                    className="flex w-full cursor-pointer items-center justify-between px-8 py-6 focus:outline-none"
-                    onClick={() => setOpen((v) => !v)}
-                    aria-label={open ? 'Collapse status panel' : 'Expand status panel'}
-                    style={{ background: 'transparent', border: 'none' }}
-                >
-                    <div className="flex items-center justify-between gap-3">
+                <div className="flex w-full items-center justify-between border-white/20 border-b px-8 py-6">
+                    <div className="flex flex-1 items-center justify-between gap-3">
                         <div className="pr-4 font-medium text-sm text-white/80">
                             {role === 'spectator' ? (
                                 'Spectating'
@@ -63,19 +61,52 @@ const GameStatusPanel: React.FC<GameStatusPanelProps> = ({
                             {isConnected ? 'Connected' : 'Disconnected'}
                         </span>
                     </div>
-                    <span className="ml-2 text-white/60">
-                        <svg
-                            className={`h-5 w-5 transition-transform duration-300 ${!open ? 'rotate-180' : ''}`}
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                            viewBox="0 0 24 24"
+                    <div className="flex items-center gap-2">
+                        <button
+                            type="button"
+                            onClick={onToggleCameraLock}
+                            className="rounded-full p-1 text-white/60 hover:bg-white/10 hover:text-white"
+                            title={cameraLocked ? 'Unlock Camera' : 'Lock Camera'}
                         >
-                            <title>Connection</title>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                        </svg>
-                    </span>
-                </button>
+                            {cameraLocked ? (
+                                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                                    />
+                                </svg>
+                            ) : (
+                                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"
+                                    />
+                                </svg>
+                            )}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setOpen((v) => !v)}
+                            className="text-white/60 hover:text-white"
+                            aria-label={open ? 'Collapse status panel' : 'Expand status panel'}
+                        >
+                            <svg
+                                className={`h-5 w-5 transition-transform duration-300 ${!open ? 'rotate-180' : ''}`}
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth={2}
+                                viewBox="0 0 24 24"
+                            >
+                                <title>Connection</title>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
                 <AnimatePresence initial={false}>
                     {open && (
                         <motion.div

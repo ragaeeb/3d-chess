@@ -11,7 +11,7 @@ const ChessBoard: React.FC<ChessBoardProps> = (props) => {
 
     return (
         <>
-            <OrbitControls makeDefault minDistance={2} />
+            <OrbitControls makeDefault minDistance={2} enableRotate={!props.cameraLocked} />
             <Lights />
             <mesh receiveShadow position={[0, -0.16, 0]}>
                 <boxGeometry args={[8.8, 0.3, 8.8]} />

@@ -43,6 +43,7 @@ const GamePage: React.FC = () => {
     const [bannerMessage, setBannerMessage] = useState<string | null>(null);
     const [showShareLink, setShowShareLink] = useState(false);
     const bannerTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [cameraLocked, setCameraLocked] = useState(false);
 
     const isSpectator = role === 'spectator';
 
@@ -249,6 +250,26 @@ const GamePage: React.FC = () => {
         };
     }, [gameId, playerId, handleJoinResult]);
 
+    // Refresh state on visibility change
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible' && gameId && playerId) {
+                joinGame(gameId, playerId)
+                    .then((result) => {
+                        handleJoinResult(result);
+                    })
+                    .catch((error) => {
+                        console.error('Failed to refresh game state', error);
+                    });
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [gameId, playerId, handleJoinResult]);
+
     // Leave Notification
     useEffect(() => {
         const handleBeforeUnload = () => {
@@ -322,6 +343,8 @@ const GamePage: React.FC = () => {
                 playerColor={playerColor}
                 role={role}
                 turn={turn}
+                cameraLocked={cameraLocked}
+                onToggleCameraLock={() => setCameraLocked((v) => !v)}
             />
 
             <Canvas
@@ -339,6 +362,7 @@ const GamePage: React.FC = () => {
                     playerColor={playerColor}
                     lastMove={lastMove}
                     isSpectator={isSpectator}
+                    cameraLocked={cameraLocked}
                 />
             </Canvas>
         </div>

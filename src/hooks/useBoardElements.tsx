@@ -13,6 +13,7 @@ export type ChessBoardProps = {
     lastMove: ChessMove | null;
     isSpectator?: boolean;
     customHighlights?: Square[];
+    cameraLocked?: boolean;
 };
 
 export const useBoardElements = ({
@@ -85,7 +86,6 @@ export const useBoardElements = ({
 
     const boardElements = useMemo(() => {
         return board.map((rowArr, row) =>
-            // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Board rendering logic is complex but localized
             rowArr.map((piece, col) => {
                 const isWhiteSquare = (row + col) % 2 === 1;
                 const squarePos: [number, number, number] = [col - 3.5, 0, row - 3.5];
